@@ -32,10 +32,10 @@ import (
 	gcecloud "k8s.io/kubernetes/pkg/cloudprovider/providers/gce"
 	"k8s.io/kubernetes/pkg/features"
 	kubeletapis "k8s.io/kubernetes/pkg/kubelet/apis"
-	utilfile "k8s.io/kubernetes/pkg/util/file"
 	"k8s.io/kubernetes/pkg/volume"
 	volumeutil "k8s.io/kubernetes/pkg/volume/util"
 	"k8s.io/utils/exec"
+	utilpath "k8s.io/utils/path"
 )
 
 const (
@@ -235,7 +235,7 @@ func verifyDevicePath(devicePaths []string, sdBeforeSet sets.String, diskName st
 
 // Calls scsi_id on the given devicePath to get the serial number reported by that device.
 func getScsiSerial(devicePath, diskName string) (string, error) {
-	exists, err := utilfile.FileExists("/lib/udev/scsi_id")
+	exists, err := utilpath.Exists(utilpath.CheckFollowSymlink, "/lib/udev/scsi_id")
 	if err != nil {
 		return "", fmt.Errorf("failed to check scsi_id existence: %v", err)
 	}
