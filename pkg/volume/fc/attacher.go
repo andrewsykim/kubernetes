@@ -34,6 +34,7 @@ import (
 )
 
 type fcAttacher struct {
+	plugin  *fcPlugin
 	host    volume.VolumeHost
 	manager diskManager
 }
@@ -48,6 +49,7 @@ var _ volume.DeviceMountableVolumePlugin = &fcPlugin{}
 
 func (plugin *fcPlugin) NewAttacher() (volume.Attacher, error) {
 	return &fcAttacher{
+		plugin:  plugin,
 		host:    plugin.host,
 		manager: &fcUtil{},
 	}, nil
@@ -131,6 +133,7 @@ func (attacher *fcAttacher) MountDevice(spec *volume.Spec, devicePath string, de
 }
 
 type fcDetacher struct {
+	plugin  *fcPlugin
 	mounter mount.Interface
 	manager diskManager
 }
@@ -141,6 +144,7 @@ var _ volume.DeviceUnmounter = &fcDetacher{}
 
 func (plugin *fcPlugin) NewDetacher() (volume.Detacher, error) {
 	return &fcDetacher{
+		plugin:  plugin,
 		mounter: plugin.host.GetMounter(plugin.GetPluginName()),
 		manager: &fcUtil{},
 	}, nil
@@ -156,7 +160,8 @@ func (detacher *fcDetacher) Detach(volumeName string, nodeName types.NodeName) e
 
 func (detacher *fcDetacher) UnmountDevice(deviceMountPath string) error {
 	// Specify device name for DetachDisk later
-	devName, _, err := mount.GetDeviceNameFromMount(detacher.mounter, deviceMountPath)
+	pluginDir := detacher.plugin.host.GetPluginDir(detacher.plugin.GetPluginName())
+	devName, err := detacher.mounter.GetDeviceNameFromMount(deviceMountPath, pluginDir)
 	if err != nil {
 		klog.Errorf("fc: failed to get device from mnt: %s\nError: %v", deviceMountPath, err)
 		return err

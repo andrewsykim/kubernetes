@@ -229,7 +229,7 @@ func TestSafeFormatAndMount(t *testing.T) {
 			}
 
 			//check that the correct device was mounted
-			mountedDevice, _, err := GetDeviceNameFromMount(fakeMounter.FakeMounter, dest)
+			mountedDevice, err := fakeMounter.FakeMounter.GetDeviceNameFromMount(dest, "")
 			if err != nil || mountedDevice != device {
 				t.Errorf("test \"%s\" the correct device was not mounted", test.description)
 			}

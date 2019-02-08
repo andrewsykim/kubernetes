@@ -207,7 +207,9 @@ func (detacher *rbdDetacher) UnmountDevice(deviceMountPath string) error {
 		klog.Warningf("Warning: Unmount skipped because path does not exist: %v", deviceMountPath)
 		return nil
 	}
-	devicePath, _, err := mount.GetDeviceNameFromMount(detacher.mounter, deviceMountPath)
+
+	pluginDir := detacher.plugin.host.GetPluginDir(detacher.plugin.GetPluginName())
+	devicePath, err := detacher.mounter.GetDeviceNameFromMount(deviceMountPath, pluginDir)
 	if err != nil {
 		return err
 	}

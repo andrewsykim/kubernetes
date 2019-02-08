@@ -504,7 +504,8 @@ func (b *storageosUnmounter) TearDown() error {
 
 	// Find device name from global mount
 	globalPDPath := makeGlobalPDName(b.plugin.host, b.pvName, b.volNamespace, b.volName)
-	devicePath, _, err := mount.GetDeviceNameFromMount(b.mounter, globalPDPath)
+	pluginDir := b.plugin.host.GetPluginDir(b.plugin.GetPluginName())
+	devicePath, err := b.mounter.GetDeviceNameFromMount(globalPDPath, pluginDir)
 	if err != nil {
 		klog.Errorf("Detach failed when getting device from global mount: %v", err)
 		return err

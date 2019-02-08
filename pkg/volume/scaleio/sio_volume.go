@@ -186,7 +186,8 @@ func (v *sioVolume) TearDownAt(dir string) error {
 	defer v.plugin.volumeMtx.UnlockKey(v.volSpecName)
 
 	mounter := v.plugin.host.GetMounter(v.plugin.GetPluginName())
-	dev, _, err := mount.GetDeviceNameFromMount(mounter, dir)
+	pluginDir := v.plugin.host.GetPluginDir(v.plugin.GetPluginName())
+	dev, err := mounter.GetDeviceNameFromMount(dir, pluginDir)
 	if err != nil {
 		klog.Errorf(log("failed to get reference count for volume: %s", dir))
 		return err
