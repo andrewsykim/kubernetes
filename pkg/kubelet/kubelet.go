@@ -259,6 +259,10 @@ type Dependencies struct {
 	DynamicPluginProber     volume.DynamicPluginProber
 	TLSOptions              *server.TLSOptions
 	KubeletConfigController *kubeletconfig.Controller
+	// DynamicCredentialProviders returns a map[string]func() error where the key is
+	// the name of the cloud provider and the value is a function that registers any
+	// dynamic credential providers based on the cloud provider
+	DynamicCredentialProviders map[string]func() error
 }
 
 // makePodSourceConfig creates a config.PodConfig from the given

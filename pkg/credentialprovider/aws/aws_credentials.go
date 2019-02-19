@@ -111,6 +111,13 @@ func RegisterCredentialsProvider(region string) {
 		})
 }
 
+// RegisterDynamicCredentialsProvider registers all credential providers that can
+// only be registered dynamically at runtime. Register credential providers here
+// if necessary information can only be fetched at runtime.
+func RegisterDynamicCredentialsProvider() error {
+	return nil
+}
+
 // Enabled implements DockerConfigProvider.Enabled for the lazy provider.
 // Since we perform no checks/work of our own and actualProvider is only created
 // later at image pulling time (if ever), always return true.

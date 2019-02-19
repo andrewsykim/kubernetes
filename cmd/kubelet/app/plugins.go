@@ -19,10 +19,10 @@ package app
 // This file exists to force the desired plugin implementations to be linked.
 import (
 	// Credential providers
-	_ "k8s.io/kubernetes/pkg/credentialprovider/aws"
-	_ "k8s.io/kubernetes/pkg/credentialprovider/azure"
-	_ "k8s.io/kubernetes/pkg/credentialprovider/gcp"
-	_ "k8s.io/kubernetes/pkg/credentialprovider/rancher"
+	awscreds "k8s.io/kubernetes/pkg/credentialprovider/aws"
+	azurecreds "k8s.io/kubernetes/pkg/credentialprovider/azure"
+	gcpcreds "k8s.io/kubernetes/pkg/credentialprovider/gcp"
+	ranchercreds "k8s.io/kubernetes/pkg/credentialprovider/rancher"
 	"k8s.io/utils/exec"
 	// Volume plugins
 	"k8s.io/kubernetes/pkg/volume"
@@ -108,4 +108,17 @@ func ProbeVolumePlugins() []volume.VolumePlugin {
 // Currently only Flexvolume plugins are dynamically discoverable.
 func GetDynamicPluginProber(pluginDir string, runner exec.Interface) volume.DynamicPluginProber {
 	return flexvolume.GetDynamicPluginProber(pluginDir, runner)
+}
+
+// DynamicCredentialProviders returns a func() error that registers dynamic credential providers
+// based on the cloud provider set by the kubelet.
+func DynamicCredentialProviders() map[string]func() error {
+	var registerFuncs map[string]func() error
+
+	registerFuncs["aws"] = awscreds.RegisterDynamicCredentialsProvider
+	registerFuncs["azure"] = azurecreds.RegisterDynamicCredentialsProvider
+	registerFuncs["gce"] = gcpcreds.RegisterDynamicCredentialsProvider
+	registerFuncs["rancher"] = ranchercreds.RegisterDynamicCredentialsProvider
+
+	return registerFuncs
 }

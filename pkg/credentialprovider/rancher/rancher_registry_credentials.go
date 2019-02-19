@@ -65,6 +65,13 @@ func init() {
 		})
 }
 
+// RegisterDynamicCredentialsProvider registers all credential providers that can
+// only be registered dynamically at runtime. Register credential providers here
+// if necessary information can only be fetched at runtime.
+func RegisterDynamicCredentialsProvider() error {
+	return nil
+}
+
 func (p *rancherProvider) Enabled() bool {
 	client, err := getRancherClient()
 	if err != nil {

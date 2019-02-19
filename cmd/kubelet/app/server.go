@@ -388,21 +388,22 @@ func UnsecuredDependencies(s *options.KubeletServer) (*kubelet.Dependencies, err
 	}
 
 	return &kubelet.Dependencies{
-		Auth:                nil, // default does not enforce auth[nz]
-		CAdvisorInterface:   nil, // cadvisor.New launches background processes (bg http.ListenAndServe, and some bg cleaners), not set here
-		Cloud:               nil, // cloud provider might start background processes
-		ContainerManager:    nil,
-		DockerClientConfig:  dockerClientConfig,
-		KubeClient:          nil,
-		HeartbeatClient:     nil,
-		CSIClient:           nil,
-		EventClient:         nil,
-		Mounter:             mounter,
-		OOMAdjuster:         oom.NewOOMAdjuster(),
-		OSInterface:         kubecontainer.RealOS{},
-		VolumePlugins:       ProbeVolumePlugins(),
-		DynamicPluginProber: GetDynamicPluginProber(s.VolumePluginDir, pluginRunner),
-		TLSOptions:          tlsOptions}, nil
+		Auth:                       nil, // default does not enforce auth[nz]
+		CAdvisorInterface:          nil, // cadvisor.New launches background processes (bg http.ListenAndServe, and some bg cleaners), not set here
+		Cloud:                      nil, // cloud provider might start background processes
+		ContainerManager:           nil,
+		DockerClientConfig:         dockerClientConfig,
+		KubeClient:                 nil,
+		HeartbeatClient:            nil,
+		CSIClient:                  nil,
+		EventClient:                nil,
+		Mounter:                    mounter,
+		OOMAdjuster:                oom.NewOOMAdjuster(),
+		OSInterface:                kubecontainer.RealOS{},
+		VolumePlugins:              ProbeVolumePlugins(),
+		DynamicPluginProber:        GetDynamicPluginProber(s.VolumePluginDir, pluginRunner),
+		DynamicCredentialProviders: DynamicCredentialProviders(),
+		TLSOptions:                 tlsOptions}, nil
 }
 
 // Run runs the specified KubeletServer with the given Dependencies. This should never exit.
@@ -533,6 +534,16 @@ func run(s *options.KubeletServer, kubeDeps *kubelet.Dependencies, stopCh <-chan
 			}
 			kubeDeps.Cloud = cloud
 		}
+	}
+
+	if kubeDeps.DynamicCredentialsProviders != nil {
+		if registerFunc, ok := kubeDeps.DynamicCredentialProviders[s.CloudProvider]; ok {
+			err := registerFunc()
+			if err != nil {
+				klog.Errorf("failed to register dynamic credential providers for cloud provider: %q err: %v".s.CloudProvider, err)
+			}
+		}
+
 	}
 
 	hostName, err := nodeutil.GetHostname(s.HostnameOverride)
