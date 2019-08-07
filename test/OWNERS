@@ -27,6 +27,7 @@ reviewers:
   - johnSchnake
   - SataQiu
 approvers:
+  - andrewsykim
   - bowei # for test/e2e/{dns*,network}.go
   - cblecker
   - rramkumar1
