@@ -3,11 +3,13 @@
 approvers:
 - gmarek
 - bowei
+- andrewsykim
 reviewers:
 - gmarek
 - smarterclayton
 - ingvagabund
 - aveshagarwal
 - k82cn
+- andrewsykim
 labels:
 - sig/network
