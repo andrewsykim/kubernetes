@@ -302,7 +302,12 @@ func (cnc *CloudNodeController) UpdateCloudNode(ctx context.Context, _, newObj i
 		return
 	}
 
-	cnc.initializeNode(ctx, node)
+	if _, enabled := cnc.cloud.InstancesV2(); enabled {
+		cnc.initializeNodeV2(ctx, node)
+		return
+	}
+
+	cnc.initializeNode(node)
 }
 
 // AddCloudNode handles initializing new nodes registered with the cloud taint.
@@ -315,7 +320,24 @@ func (cnc *CloudNodeController) AddCloudNode(ctx context.Context, obj interface{
 		return
 	}
 
-	cnc.initializeNode(ctx, node)
+	if _, enabled := cnc.cloud.InstancesV2(); enabled {
+		cnc.initializeNodeV2(ctx, node)
+		return
+	}
+
+	cnc.initializeNode(node)
+}
+
+func (cnc *CloudNodeController) initializeNodeV2(ctx context.Context, node *v1.Node) {
+	klog.Infof("Initializing node %s with cloud provider", node.Name)
+
+	instancesV2, ok := cnc.cloud.InstancesV2()
+	if !ok {
+		utilruntime.HandleError(fmt.Errorf("failed to get instances from cloud provider"))
+		return
+	}
+
+	// TODO: add logic based on InstanceMetadataByProviderID
 }
 
 // This processes nodes that were added into the cluster, and cloud initialize them if appropriate

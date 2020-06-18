@@ -49,6 +49,8 @@ type Interface interface {
 	LoadBalancer() (LoadBalancer, bool)
 	// Instances returns an instances interface. Also returns true if the interface is supported, false otherwise.
 	Instances() (Instances, bool)
+	// InstancesV2 is an external-only implementation for instances. Also returns true if the interface is supported, false otherwise.
+	InstancesV2() (InstancesV2, bool)
 	// Zones returns a zones interface. Also returns true if the interface is supported, false otherwise.
 	Zones() (Zones, bool)
 	// Clusters returns a clusters interface.  Also returns true if the interface is supported, false otherwise.
@@ -184,6 +186,17 @@ type Instances interface {
 	// If false is returned with no error, the instance will be immediately deleted by the cloud controller manager.
 	// This method should still return true for instances that exist but are stopped/sleeping.
 	// Deprecated: Remove once all calls are migrated to InstanceMetadataByProviderID
+	InstanceExistsByProviderID(ctx context.Context, providerID string) (bool, error)
+	// InstanceShutdownByProviderID returns true if the instance is shutdown in cloudprovider
+	InstanceShutdownByProviderID(ctx context.Context, providerID string) (bool, error)
+	// InstanceMetadataByProviderID returns the instance's metadata.
+	InstanceMetadataByProviderID(ctx context.Context, providerID string) (*InstanceMetadata, error)
+}
+
+// InstancesV2 is an abstract, pluggable interface for sets of instances.
+// Unlike Instances, it is a external-only implementation which should not be called the components like
+// the kube-controller-manager and the kubelet.
+type InstancesV2 interface {
 	InstanceExistsByProviderID(ctx context.Context, providerID string) (bool, error)
 	// InstanceShutdownByProviderID returns true if the instance is shutdown in cloudprovider
 	InstanceShutdownByProviderID(ctx context.Context, providerID string) (bool, error)
