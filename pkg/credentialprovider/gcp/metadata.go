@@ -28,6 +28,8 @@ import (
 	utilnet "k8s.io/apimachinery/pkg/util/net"
 	"k8s.io/klog/v2"
 	"k8s.io/kubernetes/pkg/credentialprovider"
+
+	"k8s.io/legacy-cloud-providers/gce/gcpcredentials"
 )
 
 const (
@@ -148,36 +150,36 @@ func (g *metadataProvider) Enabled() bool {
 
 // Provide implements DockerConfigProvider
 func (g *dockerConfigKeyProvider) Provide(image string) credentialprovider.DockerConfig {
-	// Read the contents of the google-dockercfg metadata key and
-	// parse them as an alternate .dockercfg
-	if cfg, err := credentialprovider.ReadDockerConfigFileFromURL(dockerConfigKey, g.Client, metadataHeader); err != nil {
-		klog.Errorf("while reading 'google-dockercfg' metadata: %v", err)
-	} else {
-		return cfg
+	cfg := credentialprovider.DockerConfig{}
+	gcpCfg := gcpcredentials.ProvideDockerConfigKey(image)
+
+	for key, value := range gcpCfg {
+		entry := credentialprovder.DockerConfigEntry{
+			Username: value.Username,
+			Password: value.Password,
+			Email:    value.Email,
+		}
+		cfg[key] = entry
 	}
 
-	return credentialprovider.DockerConfig{}
+	return cfg
 }
 
 // Provide implements DockerConfigProvider
 func (g *dockerConfigURLKeyProvider) Provide(image string) credentialprovider.DockerConfig {
-	// Read the contents of the google-dockercfg-url key and load a .dockercfg from there
-	if url, err := credentialprovider.ReadURL(dockerConfigURLKey, g.Client, metadataHeader); err != nil {
-		klog.Errorf("while reading 'google-dockercfg-url' metadata: %v", err)
-	} else {
-		if strings.HasPrefix(string(url), "http") {
-			if cfg, err := credentialprovider.ReadDockerConfigFileFromURL(string(url), g.Client, nil); err != nil {
-				klog.Errorf("while reading 'google-dockercfg-url'-specified url: %s, %v", string(url), err)
-			} else {
-				return cfg
-			}
-		} else {
-			// TODO(mattmoor): support reading alternate scheme URLs (e.g. gs:// or s3://)
-			klog.Errorf("Unsupported URL scheme: %s", string(url))
+	cfg := credentialprovider.DockerConfig{}
+	gcpCfg := gcpcredentials.ProvideDockerConfigURLKey(image)
+
+	for key, value := range gcpCfg {
+		entry := credentialprovder.DockerConfigEntry{
+			Username: value.Username,
+			Password: value.Password,
+			Email:    value.Email,
 		}
+		cfg[key] = entry
 	}
 
-	return credentialprovider.DockerConfig{}
+	return cfg
 }
 
 // runWithBackoff runs input function `f` with an exponential backoff.
@@ -267,34 +269,16 @@ type tokenBlob struct {
 // Provide implements DockerConfigProvider
 func (g *containerRegistryProvider) Provide(image string) credentialprovider.DockerConfig {
 	cfg := credentialprovider.DockerConfig{}
+	gcpCfg := gcpcredentials.ProvideContainerRegistry(image)
 
-	tokenJSONBlob, err := credentialprovider.ReadURL(metadataToken, g.Client, metadataHeader)
-	if err != nil {
-		klog.Errorf("while reading access token endpoint: %v", err)
-		return cfg
+	for key, value := range gcpCfg {
+		entry := credentialprovder.DockerConfigEntry{
+			Username: value.Username,
+			Password: value.Password,
+			Email:    value.Email,
+		}
+		cfg[key] = entry
 	}
 
-	email, err := credentialprovider.ReadURL(metadataEmail, g.Client, metadataHeader)
-	if err != nil {
-		klog.Errorf("while reading email endpoint: %v", err)
-		return cfg
-	}
-
-	var parsedBlob tokenBlob
-	if err := json.Unmarshal([]byte(tokenJSONBlob), &parsedBlob); err != nil {
-		klog.Errorf("while parsing json blob %s: %v", tokenJSONBlob, err)
-		return cfg
-	}
-
-	entry := credentialprovider.DockerConfigEntry{
-		Username: "_token",
-		Password: parsedBlob.AccessToken,
-		Email:    string(email),
-	}
-
-	// Add our entry for each of the supported container registry URLs
-	for _, k := range containerRegistryUrls {
-		cfg[k] = entry
-	}
 	return cfg
 }
