@@ -19,11 +19,8 @@ package credentialprovider
 import (
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
 	"io/ioutil"
-	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -187,67 +184,6 @@ func (he *HTTPError) Error() string {
 		he.StatusCode, he.URL)
 }
 
-// ReadURL read contents from given url
-func ReadURL(url string, client *http.Client, header *http.Header) (body []byte, err error) {
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		return nil, err
-	}
-	if header != nil {
-		req.Header = *header
-	}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		klog.V(2).Infof("body of failing http response: %v", resp.Body)
-		return nil, &HTTPError{
-			StatusCode: resp.StatusCode,
-			URL:        url,
-		}
-	}
-
-	limitedReader := &io.LimitedReader{R: resp.Body, N: maxReadLength}
-	contents, err := ioutil.ReadAll(limitedReader)
-	if err != nil {
-		return nil, err
-	}
-
-	if limitedReader.N <= 0 {
-		return nil, errors.New("the read limit is reached")
-	}
-
-	return contents, nil
-}
-
-// ReadDockerConfigFileFromURL read a docker config file from the given url
-func ReadDockerConfigFileFromURL(url string, client *http.Client, header *http.Header) (cfg DockerConfig, err error) {
-	if contents, err := ReadURL(url, client, header); err == nil {
-		return readDockerConfigFileFromBytes(contents)
-	}
-
-	return nil, err
-}
-
-func readDockerConfigFileFromBytes(contents []byte) (cfg DockerConfig, err error) {
-	if err = json.Unmarshal(contents, &cfg); err != nil {
-		return nil, errors.New("error occurred while trying to unmarshal json")
-	}
-	return
-}
-
-func readDockerConfigJSONFileFromBytes(contents []byte) (cfg DockerConfig, err error) {
-	var cfgJSON DockerConfigJSON
-	if err = json.Unmarshal(contents, &cfgJSON); err != nil {
-		return nil, errors.New("error occurred while trying to unmarshal json")
-	}
-	cfg = cfgJSON.Auths
-	return
-}
-
 // dockerConfigEntryWithAuth is used solely for deserializing the Auth field
 // into a dockerConfigEntry during JSON deserialization.
 type dockerConfigEntryWithAuth struct {
@@ -325,4 +261,11 @@ func encodeDockerConfigFieldAuth(username, password string) string {
 	fieldValue := username + ":" + password
 
 	return base64.StdEncoding.EncodeToString([]byte(fieldValue))
+}
+
+func readDockerConfigFileFromBytes(contents []byte) (cfg DockerConfig, err error) {
+	if err = json.Unmarshal(contents, &cfg); err != nil {
+		return nil, errors.New("error occurred while trying to unmarshal json")
+	}
+	return
 }

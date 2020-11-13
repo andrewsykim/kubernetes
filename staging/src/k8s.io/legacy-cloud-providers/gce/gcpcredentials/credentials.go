@@ -14,10 +14,11 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package gcp
+package gcpcredentials
 
 import (
 	"encoding/json"
+	"errors"
 	"io/ioutil"
 	"net/http"
 	"os/exec"
@@ -27,21 +28,21 @@ import (
 
 	utilnet "k8s.io/apimachinery/pkg/util/net"
 	"k8s.io/klog/v2"
-	"k8s.io/kubernetes/pkg/credentialprovider"
 )
 
 const (
-	metadataURL              = "http://metadata.google.internal./computeMetadata/v1/"
-	metadataAttributes       = metadataURL + "instance/attributes/"
-	dockerConfigKey          = metadataAttributes + "google-dockercfg"
-	dockerConfigURLKey       = metadataAttributes + "google-dockercfg-url"
-	serviceAccounts          = metadataURL + "instance/service-accounts/"
-	metadataScopes           = metadataURL + "instance/service-accounts/default/scopes"
-	metadataToken            = metadataURL + "instance/service-accounts/default/token"
-	metadataEmail            = metadataURL + "instance/service-accounts/default/email"
-	storageScopePrefix       = "https://www.googleapis.com/auth/devstorage"
-	cloudPlatformScopePrefix = "https://www.googleapis.com/auth/cloud-platform"
-	defaultServiceAccount    = "default/"
+	metadataURL               = "http://metadata.google.internal./computeMetadata/v1/"
+	metadataAttributes        = metadataURL + "instance/attributes/"
+	dockerConfigKey           = metadataAttributes + "google-dockercfg"
+	dockerConfigURLKey        = metadataAttributes + "google-dockercfg-url"
+	serviceAccounts           = metadataURL + "instance/service-accounts/"
+	metadataScopes            = metadataURL + "instance/service-accounts/default/scopes"
+	metadataToken             = metadataURL + "instance/service-accounts/default/token"
+	metadataEmail             = metadataURL + "instance/service-accounts/default/email"
+	storageScopePrefix        = "https://www.googleapis.com/auth/devstorage"
+	cloudPlatformScopePrefix  = "https://www.googleapis.com/auth/cloud-platform"
+	defaultServiceAccount     = "default/"
+	metadataHTTPClientTimeout = time.Second * 10
 )
 
 // Product file path that contains the cloud service name.
@@ -54,6 +55,11 @@ var containerRegistryUrls = []string{"container.cloud.google.com", "gcr.io", "*.
 
 var metadataHeader = &http.Header{
 	"Metadata-Flavor": []string{"Google"},
+}
+
+var httpClient = &http.Client{
+	Transport: utilnet.SetTransportDefaults(&http.Transport{}),
+	Timeout:   metadataHTTPClientTimeout,
 }
 
 // A DockerConfigProvider that reads its configuration from Google
@@ -128,11 +134,60 @@ func OnGCEVM() bool {
 	return name == "Google" || name == "Google Compute Engine"
 }
 
+func HasStorageScope() bool {
+	// Given that we are on GCE, we should keep retrying until the metadata server responds.
+	value := runWithBackoff(func() ([]byte, error) {
+		value, err := readURL(serviceAccounts, httpClient, metadataHeader)
+		if err != nil {
+			klog.V(2).Infof("Failed to Get service accounts from gce metadata server: %v", err)
+		}
+		return value, err
+	})
+
+	// We expect the service account to return a list of account directories separated by newlines, e.g.,
+	//   sv-account-name1/
+	//   sv-account-name2/
+	// ref: https://cloud.google.com/compute/docs/storing-retrieving-metadata
+	defaultServiceAccountExists := false
+	for _, sa := range strings.Split(string(value), "\n") {
+		if strings.TrimSpace(sa) == defaultServiceAccount {
+			defaultServiceAccountExists = true
+			break
+		}
+	}
+	if !defaultServiceAccountExists {
+		klog.V(2).Infof("'default' service account does not exist. Found following service accounts: %q", string(value))
+		return false
+	}
+	url := metadataScopes + "?alt=json"
+	value = runWithBackoff(func() ([]byte, error) {
+		value, err := readURL(url, httpClient, metadataHeader)
+		if err != nil {
+			klog.V(2).Infof("Failed to Get scopes in default service account from gce metadata server: %v", err)
+		}
+		return value, err
+	})
+	var scopes []string
+	if err := json.Unmarshal(value, &scopes); err != nil {
+		klog.Errorf("Failed to unmarshal scopes: %v", err)
+		return false
+	}
+	for _, v := range scopes {
+		// cloudPlatformScope implies storage scope.
+		if strings.HasPrefix(v, storageScopePrefix) || strings.HasPrefix(v, cloudPlatformScopePrefix) {
+			return true
+		}
+	}
+	klog.Warningf("Google container registry is disabled, no storage scope is available: %s", value)
+	return false
+
+}
+
 // Provide implements DockerConfigProvider
 func ProvideDockerConfigKey(image string) DockerConfig {
 	// Read the contents of the google-dockercfg metadata key and
 	// parse them as an alternate .dockercfg
-	if cfg, err := credentialprovider.ReadDockerConfigFileFromURL(dockerConfigKey, g.Client, metadataHeader); err != nil {
+	if cfg, err := ReadDockerConfigFileFromURL(dockerConfigKey, httpClient, metadataHeader); err != nil {
 		klog.Errorf("while reading 'google-dockercfg' metadata: %v", err)
 	} else {
 		return cfg
@@ -144,11 +199,11 @@ func ProvideDockerConfigKey(image string) DockerConfig {
 // Provide implements DockerConfigProvider
 func ProvideDockerConfigURLKey(image string) DockerConfig {
 	// Read the contents of the google-dockercfg-url key and load a .dockercfg from there
-	if url, err := ReadURL(dockerConfigURLKey, g.Client, metadataHeader); err != nil {
+	if url, err := readURL(dockerConfigURLKey, httpClient, metadataHeader); err != nil {
 		klog.Errorf("while reading 'google-dockercfg-url' metadata: %v", err)
 	} else {
 		if strings.HasPrefix(string(url), "http") {
-			if cfg, err := credentialprovider.ReadDockerConfigFileFromURL(string(url), g.Client, nil); err != nil {
+			if cfg, err := ReadDockerConfigFileFromURL(string(url), httpClient, nil); err != nil {
 				klog.Errorf("while reading 'google-dockercfg-url'-specified url: %s, %v", string(url), err)
 			} else {
 				return cfg
@@ -162,24 +217,6 @@ func ProvideDockerConfigURLKey(image string) DockerConfig {
 	return DockerConfig{}
 }
 
-// runWithBackoff runs input function `f` with an exponential backoff.
-// Note that this method can block indefinitely.
-func runWithBackoff(f func() ([]byte, error)) []byte {
-	var backoff = 100 * time.Millisecond
-	const maxBackoff = time.Minute
-	for {
-		value, err := f()
-		if err == nil {
-			return value
-		}
-		time.Sleep(backoff)
-		backoff = backoff * 2
-		if backoff > maxBackoff {
-			backoff = maxBackoff
-		}
-	}
-}
-
 // tokenBlob is used to decode the JSON blob containing an access token
 // that is returned by GCE metadata.
 type tokenBlob struct {
@@ -187,16 +224,16 @@ type tokenBlob struct {
 }
 
 // Provide implements DockerConfigProvider
-func ProvideContainerRegistry(image string) credentialprovider.DockerConfig {
-	cfg := credentialprovider.DockerConfig{}
+func ProvideContainerRegistry(image string) DockerConfig {
+	cfg := DockerConfig{}
 
-	tokenJSONBlob, err := ReadURL(metadataToken, g.Client, metadataHeader)
+	tokenJSONBlob, err := readURL(metadataToken, httpClient, metadataHeader)
 	if err != nil {
 		klog.Errorf("while reading access token endpoint: %v", err)
 		return cfg
 	}
 
-	email, err := ReadURL(metadataEmail, g.Client, metadataHeader)
+	email, err := readURL(metadataEmail, httpClient, metadataHeader)
 	if err != nil {
 		klog.Errorf("while reading email endpoint: %v", err)
 		return cfg
@@ -208,7 +245,7 @@ func ProvideContainerRegistry(image string) credentialprovider.DockerConfig {
 		return cfg
 	}
 
-	entry := credentialprovider.DockerConfigEntry{
+	entry := DockerConfigEntry{
 		Username: "_token",
 		Password: parsedBlob.AccessToken,
 		Email:    string(email),
@@ -221,8 +258,8 @@ func ProvideContainerRegistry(image string) credentialprovider.DockerConfig {
 	return cfg
 }
 
-// ReadURL read contents from given url
-func ReadURL(url string, client *http.Client, header *http.Header) (body []byte, err error) {
+// readURL read contents from given url
+func readURL(url string, client *http.Client, header *http.Header) (body []byte, err error) {
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return nil, err
@@ -259,7 +296,7 @@ func ReadURL(url string, client *http.Client, header *http.Header) (body []byte,
 
 // ReadDockerConfigFileFromURL read a docker config file from the given url
 func ReadDockerConfigFileFromURL(url string, client *http.Client, header *http.Header) (cfg DockerConfig, err error) {
-	if contents, err := ReadURL(url, client, header); err == nil {
+	if contents, err := readURL(url, client, header); err == nil {
 		return readDockerConfigFileFromBytes(contents)
 	}
 
@@ -271,4 +308,22 @@ func readDockerConfigFileFromBytes(contents []byte) (cfg DockerConfig, err error
 		return nil, errors.New("error occurred while trying to unmarshal json")
 	}
 	return
+}
+
+// runWithBackoff runs input function `f` with an exponential backoff.
+// Note that this method can block indefinitely.
+func runWithBackoff(f func() ([]byte, error)) []byte {
+	var backoff = 100 * time.Millisecond
+	const maxBackoff = time.Minute
+	for {
+		value, err := f()
+		if err == nil {
+			return value
+		}
+		time.Sleep(backoff)
+		backoff = backoff * 2
+		if backoff > maxBackoff {
+			backoff = maxBackoff
+		}
+	}
 }
