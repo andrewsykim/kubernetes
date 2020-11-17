@@ -99,6 +99,7 @@ filegroup(
         "//staging/src/k8s.io/api/flowcontrol/v1beta1:all-srcs",
         "//staging/src/k8s.io/api/imagepolicy/v1alpha1:all-srcs",
         "//staging/src/k8s.io/api/networking/v1:all-srcs",
+        "//staging/src/k8s.io/api/networking/v1alpha1:all-srcs",
         "//staging/src/k8s.io/api/networking/v1beta1:all-srcs",
         "//staging/src/k8s.io/api/node/v1:all-srcs",
         "//staging/src/k8s.io/api/node/v1alpha1:all-srcs",

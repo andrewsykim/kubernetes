@@ -52,6 +52,8 @@ func addKnownTypes(scheme *runtime.Scheme) error {
 		&IngressList{},
 		&IngressClass{},
 		&IngressClassList{},
+		&DNSPolicy{},
+		&DNSPolicyList{},
 	)
 	return nil
 }
