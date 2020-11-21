@@ -1,4 +1,4 @@
-/*
+/*.
 Copyright 2016 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -18,6 +18,7 @@ package rest
 
 import (
 	networkingapiv1 "k8s.io/api/networking/v1"
+	networkingapiv1alpha1 "k8s.io/api/networking/v1alpha1"
 	networkingapiv1beta1 "k8s.io/api/networking/v1beta1"
 	"k8s.io/apiserver/pkg/registry/generic"
 	"k8s.io/apiserver/pkg/registry/rest"
@@ -25,9 +26,10 @@ import (
 	serverstorage "k8s.io/apiserver/pkg/server/storage"
 	"k8s.io/kubernetes/pkg/api/legacyscheme"
 	"k8s.io/kubernetes/pkg/apis/networking"
+	dnspolicystore "k8s.io/kubernetes/pkg/registry/networking/dnspolicy/storage"
+	networkpolicystore "k8s.io/kubernetes/pkg/registry/networking/dnspolicy/storage"
 	ingressstore "k8s.io/kubernetes/pkg/registry/networking/ingress/storage"
 	ingressclassstore "k8s.io/kubernetes/pkg/registry/networking/ingressclass/storage"
-	networkpolicystore "k8s.io/kubernetes/pkg/registry/networking/networkpolicy/storage"
 )
 
 type RESTStorageProvider struct{}
@@ -50,6 +52,14 @@ func (p RESTStorageProvider) NewRESTStorage(apiResourceConfigSource serverstorag
 			return genericapiserver.APIGroupInfo{}, false, err
 		} else {
 			apiGroupInfo.VersionedResourcesStorageMap[networkingapiv1beta1.SchemeGroupVersion.Version] = storageMap
+		}
+	}
+
+	if apiResourceConfigSource.VersionEnabled(networkingapiv1alpha1.SchemeGroupVersion) {
+		if storageMap, err := p.v1alpha1Storage(apiResourceConfigSource, restOptionsGetter); err != nil {
+			return genericapiserver.APIGroupInfo{}, false, err
+		} else {
+			apiGroupInfo.VersionedResourcesStorageMap[networkingapiv1alpha1.SchemeGroupVersion.Version] = storageMap
 		}
 	}
 
@@ -99,6 +109,19 @@ func (p RESTStorageProvider) v1beta1Storage(apiResourceConfigSource serverstorag
 		return storage, err
 	}
 	storage["ingressclasses"] = ingressClassStorage
+
+	return storage, nil
+}
+
+func (p RESTStorageProvider) v1alpha1Storage(apiResourceConfigSource serverstorage.APIResourceConfigSource, restOptionsGetter generic.RESTOptionsGetter) (map[string]rest.Storage, error) {
+	storage := map[string]rest.Storage{}
+
+	// network policies
+	dnsPolicyStorage, err := dnspolicystore.NewREST(restOptionsGetter)
+	if err != nil {
+		return storage, err
+	}
+	storage["dnspolicies"] = dnsPolicyStorage
 
 	return storage, nil
 }

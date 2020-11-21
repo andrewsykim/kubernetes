@@ -546,6 +546,39 @@ func validateIngressTypedLocalObjectReference(params *api.TypedLocalObjectRefere
 	return allErrs
 }
 
+// ValidateDNSPolicyName can be used to check whether the given dnspolicy
+// name is valid.
+func ValidateDNSPolicyName(name string, prefix bool) []string {
+	return apimachineryvalidation.NameIsDNSSubdomain(name, prefix)
+}
+
+// ValidateDNSPolicy validates a dnspolicy.
+func ValidateDNSPolicy(dnsPolicy *networking.DNSPolicy) field.ErrorList {
+	allErrs := apivalidation.ValidateObjectMeta(&dnsPolicy.ObjectMeta, true, ValidateDNSPolicyName, field.NewPath("metadata"))
+	allErrs = append(allErrs, ValidateDNSPolicySpec(&dnsPolicy.Spec, field.NewPath("spec"))...)
+	return allErrs
+}
+
+// ValidateDNSPolicyUpdate test if an update to a DNSPolciy is valid.
+func ValidateDNSPolicyUpdate(updated, old *networking.DNSPolicy) field.ErrorList {
+	allErrs := field.ErrorList{}
+	allErrs = append(allErrs, apivalidation.ValidateObjectMetaUpdate(&updated.ObjectMeta, &old.ObjectMeta, field.NewPath("metadata"))...)
+	allErrs = append(allErrs, ValidateDNSPolicySpec(&updated.Spec, field.NewPath("spec"))...)
+
+	return allErrs
+}
+
+// ValidateDNSPolicySpec validates if required fields in the dnspolicy spec are set.
+func ValidateDNSPolicySpec(dnsPolicySpec *networking.DNSPolicySpec, fldPath *field.Path) field.ErrorList {
+	allErrs := field.ErrorList{}
+
+	if len(dnsPolicySpec.AllowedDomains) == 0 {
+		allErrs = append(allErrs, field.Required(fldPath.Child("allowedDomains"), "at least 1 entry in allowedDomains is required"))
+	}
+
+	return allErrs
+}
+
 func allowInvalidSecretName(gv schema.GroupVersion, oldIngress *networking.Ingress) bool {
 	if gv == networkingv1beta1.SchemeGroupVersion || gv == extensionsv1beta1.SchemeGroupVersion {
 		// backwards compatibility with released API versions that allowed invalid names

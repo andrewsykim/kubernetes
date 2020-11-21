@@ -695,7 +695,6 @@ func DefaultAPIResourceConfigSource() *serverstorage.ResourceConfig {
 		extensionsapiv1beta1.SchemeGroupVersion,
 		networkingapiv1.SchemeGroupVersion,
 		networkingapiv1beta1.SchemeGroupVersion,
-		networkingapiv1alpha1.SchemeGroupVersion,
 		nodev1.SchemeGroupVersion,
 		nodev1beta1.SchemeGroupVersion,
 		policyapiv1beta1.SchemeGroupVersion,
@@ -720,6 +719,7 @@ func DefaultAPIResourceConfigSource() *serverstorage.ResourceConfig {
 		schedulingv1alpha1.SchemeGroupVersion,
 		storageapiv1alpha1.SchemeGroupVersion,
 		flowcontrolv1alpha1.SchemeGroupVersion,
+		networkingapiv1alpha1.SchemeGroupVersion,
 	)
 
 	return ret
