@@ -1,4 +1,4 @@
-/*.
+/*
 Copyright 2016 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -27,9 +27,9 @@ import (
 	"k8s.io/kubernetes/pkg/api/legacyscheme"
 	"k8s.io/kubernetes/pkg/apis/networking"
 	dnspolicystore "k8s.io/kubernetes/pkg/registry/networking/dnspolicy/storage"
-	networkpolicystore "k8s.io/kubernetes/pkg/registry/networking/dnspolicy/storage"
 	ingressstore "k8s.io/kubernetes/pkg/registry/networking/ingress/storage"
 	ingressclassstore "k8s.io/kubernetes/pkg/registry/networking/ingressclass/storage"
+	networkpolicystore "k8s.io/kubernetes/pkg/registry/networking/networkpolicy/storage"
 )
 
 type RESTStorageProvider struct{}
@@ -116,7 +116,6 @@ func (p RESTStorageProvider) v1beta1Storage(apiResourceConfigSource serverstorag
 func (p RESTStorageProvider) v1alpha1Storage(apiResourceConfigSource serverstorage.APIResourceConfigSource, restOptionsGetter generic.RESTOptionsGetter) (map[string]rest.Storage, error) {
 	storage := map[string]rest.Storage{}
 
-	// network policies
 	dnsPolicyStorage, err := dnspolicystore.NewREST(restOptionsGetter)
 	if err != nil {
 		return storage, err

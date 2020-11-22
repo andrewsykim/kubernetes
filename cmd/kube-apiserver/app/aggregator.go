@@ -260,7 +260,8 @@ var apiVersionPriorities = map[schema.GroupVersion]priority{
 	{Group: "certificates.k8s.io", Version: "v1"}:                {group: 17300, version: 15},
 	{Group: "certificates.k8s.io", Version: "v1beta1"}:           {group: 17300, version: 9},
 	{Group: "networking.k8s.io", Version: "v1"}:                  {group: 17200, version: 15},
-	{Group: "networking.k8s.io", Version: "v1beta1"}:             {group: 17200, version: 9},
+	{Group: "networking.k8s.io", Version: "v1beta1"}:             {group: 17200, version: 12},
+	{Group: "networking.k8s.io", Version: "v1alpha1"}:            {group: 17200, version: 9},
 	{Group: "extensions", Version: "v1beta1"}:                    {group: 17150, version: 1}, // prioritize below networking.k8s.io, which contains the GA version of Ingress, the only resource remaining in extensions/v1beta1
 	{Group: "policy", Version: "v1beta1"}:                        {group: 17100, version: 9},
 	{Group: "rbac.authorization.k8s.io", Version: "v1"}:          {group: 17000, version: 15},
