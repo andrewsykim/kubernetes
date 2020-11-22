@@ -36,6 +36,7 @@ import (
 	discoveryv1beta1 "k8s.io/api/discovery/v1beta1"
 	extensionsv1beta1 "k8s.io/api/extensions/v1beta1"
 	flowcontrolv1beta1 "k8s.io/api/flowcontrol/v1beta1"
+	networkingv1alpha1 "k8s.io/api/networking/v1alpha1"
 	policyv1beta1 "k8s.io/api/policy/v1beta1"
 	rbacv1beta1 "k8s.io/api/rbac/v1beta1"
 	schedulingv1 "k8s.io/api/scheduling/v1"
@@ -385,6 +386,15 @@ func AddHandlers(h printers.PrintHandler) {
 	}
 	h.TableHandler(networkPolicyColumnDefinitioins, printNetworkPolicy)
 	h.TableHandler(networkPolicyColumnDefinitioins, printNetworkPolicyList)
+
+	dnsPolicyColumnDefinitioins := []metav1.TableColumnDefinition{
+		{Name: "Name", Type: "string", Format: "name", Description: metav1.ObjectMeta{}.SwaggerDoc()["name"]},
+		{Name: "Pod-Selector", Type: "string", Description: networkingv1alpha1.DNSPolicySpec{}.SwaggerDoc()["podSelector"]},
+		{Name: "Allowed-Domains", Type: "string", Description: networkingv1alpha1.DNSPolicySpec{}.SwaggerDoc()["allowedDomains"]},
+		{Name: "Age", Type: "string", Description: metav1.ObjectMeta{}.SwaggerDoc()["creationTimestamp"]},
+	}
+	h.TableHandler(dnsPolicyColumnDefinitioins, printDNSPolicy)
+	h.TableHandler(dnsPolicyColumnDefinitioins, printDNSPolicyList)
 
 	roleBindingsColumnDefinitions := []metav1.TableColumnDefinition{
 		{Name: "Name", Type: "string", Format: "name", Description: metav1.ObjectMeta{}.SwaggerDoc()["name"]},
@@ -2198,6 +2208,26 @@ func printNetworkPolicyList(list *networking.NetworkPolicyList, options printers
 	rows := make([]metav1.TableRow, 0, len(list.Items))
 	for i := range list.Items {
 		r, err := printNetworkPolicy(&list.Items[i], options)
+		if err != nil {
+			return nil, err
+		}
+		rows = append(rows, r...)
+	}
+	return rows, nil
+}
+
+func printDNSPolicy(obj *networking.DNSPolicy, options printers.GenerateOptions) ([]metav1.TableRow, error) {
+	row := metav1.TableRow{
+		Object: runtime.RawExtension{Object: obj},
+	}
+	row.Cells = append(row.Cells, obj.Name, metav1.FormatLabelSelector(&obj.Spec.PodSelector), strings.Join(obj.Spec.AllowedDomains, ","), translateTimestampSince(obj.CreationTimestamp))
+	return []metav1.TableRow{row}, nil
+}
+
+func printDNSPolicyList(list *networking.DNSPolicyList, options printers.GenerateOptions) ([]metav1.TableRow, error) {
+	rows := make([]metav1.TableRow, 0, len(list.Items))
+	for i := range list.Items {
+		r, err := printDNSPolicy(&list.Items[i], options)
 		if err != nil {
 			return nil, err
 		}
