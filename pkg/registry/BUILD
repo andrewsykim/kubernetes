@@ -75,6 +75,7 @@ filegroup(
         "//pkg/registry/flowcontrol/flowschema:all-srcs",
         "//pkg/registry/flowcontrol/prioritylevelconfiguration:all-srcs",
         "//pkg/registry/flowcontrol/rest:all-srcs",
+        "//pkg/registry/networking/dnspolicy:all-srcs",
         "//pkg/registry/networking/ingress:all-srcs",
         "//pkg/registry/networking/ingressclass:all-srcs",
         "//pkg/registry/networking/networkpolicy:all-srcs",
