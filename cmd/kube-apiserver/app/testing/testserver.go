@@ -256,7 +256,11 @@ func StartTestServer(t Logger, instanceOptions *TestServerInstanceOptions, custo
 			storageVersionCheck := fmt.Sprintf("poststarthook/%s", apiserver.StorageVersionPostStartHookName)
 			req.Param("exclude", storageVersionCheck)
 		}
-		result := req.Do(context.TODO())
+
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		result := req.Do(ctx)
 		status := 0
 		result.StatusCode(&status)
 		if status == 200 {
