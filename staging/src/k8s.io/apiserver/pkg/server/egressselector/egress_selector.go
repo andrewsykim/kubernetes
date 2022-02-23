@@ -30,6 +30,7 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/keepalive"
 
 	utilnet "k8s.io/apimachinery/pkg/util/net"
 	"k8s.io/apiserver/pkg/apis/apiserver"
@@ -199,8 +200,15 @@ func (u *udsGRPCConnector) connect() (proxier, error) {
 		return c, err
 	})
 
+	keepAliveParams := keepalive.ClientParameters{
+		Time:                20 * time.Second,
+		Timeout:             10 * time.Second,
+		PermitWithoutStream: true,
+	}
+	keepAliveOpts := grpc.WithKeepaliveParams(keepAliveParams)
+
 	ctx := context.TODO()
-	tunnel, err := client.CreateSingleUseGrpcTunnel(ctx, udsName, dialOption, grpc.WithInsecure())
+	tunnel, err := client.CreateSingleUseGrpcTunnel(ctx, udsName, dialOption, keepAliveOpts, grpc.WithInsecure())
 	if err != nil {
 		return nil, err
 	}
