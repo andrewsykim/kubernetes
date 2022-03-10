@@ -374,6 +374,8 @@ func TestDeleteEndpointConnectionsIPv6(t *testing.T) {
 
 const testHostname = "test-hostname"
 const testNodeIP = "192.168.0.2"
+const testExternalClient = "203.0.113.2"
+const testExternalClientBlocked = "203.0.113.130"
 
 func NewFakeProxier(ipt utiliptables.Interface) *Proxier {
 	// TODO: Call NewProxier after refactoring out the goroutine
@@ -1345,6 +1347,423 @@ func assertIPTablesRulesNotEqual(t *testing.T, expected, result string) {
 	}
 }
 
+// ruleMatchesIP helps test whether an iptables rule such as "! -s 192.168.0.0/16" matches
+// ipStr. ruleAddress is either an IP address ("1.2.3.4") or a CIDR string
+// ("1.2.3.0/24"). negated is whether the iptables rule negates the match.
+func ruleMatchesIP(negated bool, ruleAddress, ipStr string) bool {
+	ip := netutils.ParseIPSloppy(ipStr)
+	if ip == nil {
+		panic("bad IP in test case: " + ipStr)
+	}
+
+	var matches bool
+	if strings.Contains(ruleAddress, "/") {
+		_, cidr, err := netutils.ParseCIDRSloppy(ruleAddress)
+		if err != nil {
+			panic("bad CIDR in kube-proxy output: " + err.Error())
+		}
+		matches = cidr.Contains(ip)
+	} else {
+		ip2 := netutils.ParseIPSloppy(ruleAddress)
+		if ip2 == nil {
+			panic("bad IP/CIDR in kube-proxy output: " + ruleAddress)
+		}
+		matches = ip.Equal(ip2)
+	}
+	return (!negated && matches) || (negated && !matches)
+}
+
+var addChainRegex = regexp.MustCompile(`-A ([^ ]*) `)
+var commentRegex = regexp.MustCompile(`-m comment --comment ("[^"]*"|[^" ]*) `)
+var moduleRegex = regexp.MustCompile("-m ([^ ]*)")
+var localRegex = regexp.MustCompile("(!)? --(src|dst)-type LOCAL")
+var destIPRegex = regexp.MustCompile("(!)? -d ([^ ]*) ")
+var destPortRegex = regexp.MustCompile(" --dport ([^ ]*) ")
+var sourceIPRegex = regexp.MustCompile("(!)? -s ([^ ]*) ")
+var affinityRegex = regexp.MustCompile(" --rcheck ")
+var jumpRegex = regexp.MustCompile("(--probability.*)? -j ([^ ]*)( --to-destination (.*))?$")
+
+func Test_iptablesTracerRegexps(t *testing.T) {
+	testCases := []struct {
+		name    string
+		regex   *regexp.Regexp
+		rule    string
+		matches []string
+	}{
+		{
+			name:    "addChainRegex",
+			regex:   addChainRegex,
+			rule:    `-A KUBE-NODEPORTS -m comment --comment "ns2/svc2:p80 health check node port" -m tcp -p tcp --dport 30000 -j ACCEPT`,
+			matches: []string{`-A KUBE-NODEPORTS `, "KUBE-NODEPORTS"},
+		},
+		{
+			name:    "addChainRegex requires an actual rule, not just a chain name",
+			regex:   addChainRegex,
+			rule:    `-A KUBE-NODEPORTS`,
+			matches: nil,
+		},
+		{
+			name:    "addChainRegex only matches adds",
+			regex:   addChainRegex,
+			rule:    `-D KUBE-NODEPORTS -m comment --comment "ns2/svc2:p80 health check node port" -m tcp -p tcp --dport 30000 -j ACCEPT`,
+			matches: nil,
+		},
+		{
+			name:    "commentRegex with quoted comment",
+			regex:   commentRegex,
+			rule:    `-A KUBE-NODEPORTS -m comment --comment "ns2/svc2:p80 health check node port" -m tcp -p tcp --dport 30000 -j ACCEPT`,
+			matches: []string{`-m comment --comment "ns2/svc2:p80 health check node port" `, `"ns2/svc2:p80 health check node port"`},
+		},
+		{
+			name:    "commentRegex with unquoted comment",
+			regex:   commentRegex,
+			rule:    `-A KUBE-SVC-XPGD46QRK7WJZT7O -m comment --comment ns1/svc1:p80 -j KUBE-SEP-SXIVWICOYRO3J4NJ`,
+			matches: []string{`-m comment --comment ns1/svc1:p80 `, "ns1/svc1:p80"},
+		},
+		{
+			name:    "no comment",
+			regex:   commentRegex,
+			rule:    `-A KUBE-POSTROUTING -j MARK --xor-mark 0x4000`,
+			matches: nil,
+		},
+		{
+			name:    "moduleRegex",
+			regex:   moduleRegex,
+			rule:    `-A KUBE-NODEPORTS -m comment --comment "ns2/svc2:p80 health check node port" -m tcp -p tcp --dport 30000 -j ACCEPT`,
+			matches: []string{"-m comment", "comment"},
+		},
+		{
+			name:    "local source",
+			regex:   localRegex,
+			rule:    `-A KUBE-XLB-GNZBNJ2PO5MGZ6GT -m comment --comment "masquerade LOCAL traffic for ns2/svc2:p80 LB IP" -m addrtype --src-type LOCAL -j KUBE-MARK-MASQ`,
+			matches: []string{" --src-type LOCAL", "", "src"},
+		},
+		{
+			name:    "not local destination",
+			regex:   localRegex,
+			rule:    `-A RULE-TYPE-NOT-CURRENTLY-USED-BY-KUBE-PROXY -m addrtype ! --dst-type LOCAL -j KUBE-MARK-MASQ`,
+			matches: []string{"! --dst-type LOCAL", "!", "dst"},
+		},
+		{
+			name:    "destination IP",
+			regex:   destIPRegex,
+			rule:    `-A KUBE-SERVICES -m comment --comment "ns1/svc1:p80 cluster IP" -m tcp -p tcp -d 172.30.0.41 --dport 80 -j KUBE-SVC-XPGD46QRK7WJZT7O`,
+			matches: []string{" -d 172.30.0.41 ", "", "172.30.0.41"},
+		},
+		{
+			name:    "destination port",
+			regex:   destPortRegex,
+			rule:    `-A KUBE-SERVICES -m comment --comment "ns1/svc1:p80 cluster IP" -m tcp -p tcp -d 172.30.0.41 --dport 80 -j KUBE-SVC-XPGD46QRK7WJZT7O`,
+			matches: []string{" --dport 80 ", "80"},
+		},
+		{
+			name:    "destination IP but no port",
+			regex:   destPortRegex,
+			rule:    `-A KUBE-SVC-XPGD46QRK7WJZT7O -d 172.30.0.41 ! -s 10.0.0.0/8 -j KUBE-MARK-MASQ`,
+			matches: nil,
+		},
+		{
+			name:    "source IP",
+			regex:   sourceIPRegex,
+			rule:    `-A KUBE-SEP-SXIVWICOYRO3J4NJ -m comment --comment ns1/svc1:p80 -s 10.180.0.1 -j KUBE-MARK-MASQ`,
+			matches: []string{" -s 10.180.0.1 ", "", "10.180.0.1"},
+		},
+		{
+			name:    "not source IP",
+			regex:   sourceIPRegex,
+			rule:    `-A KUBE-SVC-XPGD46QRK7WJZT7O -m comment --comment "ns1/svc1:p80 cluster IP" -m tcp -p tcp -d 172.30.0.41 --dport 80 ! -s 10.0.0.0/8 -j KUBE-MARK-MASQ`,
+			matches: []string{"! -s 10.0.0.0/8 ", "!", "10.0.0.0/8"},
+		},
+		{
+			name:    "affinityRegex",
+			regex:   affinityRegex,
+			rule:    `-A KUBE-SVC-XPGD46QRK7WJZT7O -m comment --comment ns1/svc1:p80 -m recent --name KUBE-SEP-SXIVWICOYRO3J4NJ --rcheck --seconds 10800 --reap -j KUBE-SEP-SXIVWICOYRO3J4NJ`,
+			matches: []string{" --rcheck "},
+		},
+		{
+			name:    "jump to internal target",
+			regex:   jumpRegex,
+			rule:    `-A KUBE-NODEPORTS -m comment --comment "ns2/svc2:p80 health check node port" -m tcp -p tcp --dport 30000 -j ACCEPT`,
+			matches: []string{" -j ACCEPT", "", "ACCEPT", "", ""},
+		},
+		{
+			name:    "jump to KUBE chain",
+			regex:   jumpRegex,
+			rule:    `-A KUBE-SVC-XPGD46QRK7WJZT7O -m comment --comment ns1/svc1:p80 -j KUBE-SEP-SXIVWICOYRO3J4NJ`,
+			matches: []string{" -j KUBE-SEP-SXIVWICOYRO3J4NJ", "", "KUBE-SEP-SXIVWICOYRO3J4NJ", "", ""},
+		},
+		{
+			name:    "jump to DNAT",
+			regex:   jumpRegex,
+			rule:    `-A KUBE-SEP-SXIVWICOYRO3J4NJ -m comment --comment ns1/svc1:p80 -m tcp -p tcp -j DNAT --to-destination 10.180.0.1:80`,
+			matches: []string{" -j DNAT --to-destination 10.180.0.1:80", "", "DNAT", " --to-destination 10.180.0.1:80", "10.180.0.1:80"},
+		},
+		{
+			name:    "jump to endpoint",
+			regex:   jumpRegex,
+			rule:    `-A KUBE-SVC-4SW47YFZTEDKD3PK -m comment --comment ns4/svc4:p80 -m statistic --mode random --probability 0.5000000000 -j KUBE-SEP-UKSFD7AGPMPPLUHC`,
+			matches: []string{"--probability 0.5000000000 -j KUBE-SEP-UKSFD7AGPMPPLUHC", "--probability 0.5000000000", "KUBE-SEP-UKSFD7AGPMPPLUHC", "", ""},
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			matches := testCase.regex.FindStringSubmatch(testCase.rule)
+			if !reflect.DeepEqual(matches, testCase.matches) {
+				t.Errorf("bad match: expected %#v, got %#v", testCase.matches, matches)
+			}
+		})
+	}
+}
+
+var noMatchModules = sets.NewString("conntrack", "mark")
+var knownModules = sets.NewString("addrtype", "recent", "statistic", "tcp")
+
+type iptablesChain []string
+type iptablesTable map[string]iptablesChain
+
+// iptablesTracer holds data used while virtually tracing a packet through a set of
+// iptables rules
+type iptablesTracer struct {
+	tables map[string]iptablesTable
+
+	nodeIP string
+
+	matches  []string
+	outputs  []string
+	markMasq bool
+	markDrop bool
+}
+
+// newIPTablesTracer creates an iptablesTracer. ruleData is an iptables rule dump (as with
+// "iptables-save"). nodeIP is the IP to treat as the local node IP (for determining
+// whether rules with "--src-type LOCAL" or "--dst-type LOCAL" match).
+func newIPTablesTracer(ruleData, nodeIP string) (*iptablesTracer, error) {
+	tables, err := parseIPTablesData(ruleData)
+	if err != nil {
+		return nil, err
+	}
+
+	tracer := &iptablesTracer{
+		tables: make(map[string]iptablesTable),
+		nodeIP: nodeIP,
+	}
+
+	for name, rules := range tables {
+		table := make(iptablesTable)
+		for _, rule := range rules {
+			match := addChainRegex.FindStringSubmatch(rule)
+			if match != nil {
+				table[match[1]] = append(table[match[1]], rule)
+			}
+		}
+		tracer.tables[name] = table
+	}
+
+	return tracer, nil
+}
+
+// ruleMatches checks if the given iptables rule matches (at least probabilistically) a
+// packet with the given sourceIP, destIP, and destPort.
+func (tracer *iptablesTracer) ruleMatches(rule, sourceIP, destIP, destPort string) bool {
+	var match []string
+
+	// Delete comments so we don't mistakenly match something in a comment string later
+	rule = commentRegex.ReplaceAllString(rule, "")
+
+	// Find all of the modules ("-m foo") used; if any of them are in noMatchModules
+	// then the rule is automatically assumed to not match any traffic (for our
+	// purposes). If any of them are not in either noMatchModules or knownModules,
+	// then log a warning and assume the rule doesn't match. (This will only get
+	// triggered if Proxier starts using a new kind of iptables match in the future.)
+	for _, moduleMatches := range moduleRegex.FindAllStringSubmatch(rule, -1) {
+		if noMatchModules.Has(moduleMatches[1]) {
+			return false
+		} else if !knownModules.Has(moduleMatches[1]) {
+			klog.ErrorS(nil, "Rule uses unknown iptables module; assuming no match", "rule", rule, "module", moduleMatches[1])
+			return false
+		}
+	}
+
+	// The sub-rules within an iptables rule are ANDed together, so the rule only
+	// matches if all of them match. So go through the subrules, and if any of them
+	// DON'T match, then fail.
+
+	// Match local/non-local.
+	// localRegex = /(!)? --(src|dst)-type LOCAL/
+	match = localRegex.FindStringSubmatch(rule)
+	if match != nil {
+		sourceIsLocal := sourceIP == tracer.nodeIP || sourceIP == "127.0.0.1"
+		destIsLocal := destIP == tracer.nodeIP || destIP == "127.0.0.1"
+
+		if match[1] == "" && match[2] == "src" && !sourceIsLocal {
+			return false
+		}
+		if match[1] == "!" && match[2] == "src" && sourceIsLocal {
+			return false
+		}
+		if match[1] == "" && match[2] == "dst" && !destIsLocal {
+			return false
+		}
+		if match[1] == "!" && match[2] == "dst" && destIsLocal {
+			return false
+		}
+	}
+
+	// Match destination IP/port.
+	// destIPRegex = /(!)? -d ([^ ]*) /
+	match = destIPRegex.FindStringSubmatch(rule)
+	if match != nil {
+		if !ruleMatchesIP(match[1] == "!", match[2], destIP) {
+			return false
+		}
+	}
+	// destPortRegex = / --dport ([^ ]*) /
+	match = destPortRegex.FindStringSubmatch(rule)
+	if match != nil && match[1] != destPort {
+		return false
+	}
+
+	// Match source IP
+	// sourceIPRegex = /(!)? -s ([^ ]*) /
+	match = sourceIPRegex.FindStringSubmatch(rule)
+	if match != nil {
+		if !ruleMatchesIP(match[1] == "!", match[2], sourceIP) {
+			return false
+		}
+	}
+
+	// Ignore SessionAffinity rules
+	// affinityRegex = / --rcheck /
+	if affinityRegex.MatchString(rule) {
+		return false
+	}
+
+	// Anything else is assumed to match
+	return true
+}
+
+// runChain runs the given packet through the rules in the given table and chain, updating
+// tracer's internal state accordingly. It returns true if it hits a terminal action.
+func (tracer *iptablesTracer) runChain(table, chain, sourceIP, destIP, destPort string) bool {
+	for _, rule := range tracer.tables[table][chain] {
+		// Match any rule that jumps to another chain or built-in target.
+		// jumpRegex = /(--probability.*)? -j ([^ ]*)( --to-destination (.*))?$/
+		match := jumpRegex.FindStringSubmatch(rule)
+		if match == nil {
+			continue
+		}
+		isProbabilisticMatch := (match[1] != "")
+		target := match[2]
+		natDestination := match[4]
+
+		if !tracer.ruleMatches(rule, sourceIP, destIP, destPort) {
+			continue
+		}
+		tracer.matches = append(tracer.matches, rule)
+
+		switch target {
+		case "KUBE-MARK-MASQ":
+			tracer.markMasq = true
+			continue
+
+		case "KUBE-MARK-DROP":
+			tracer.markDrop = true
+			continue
+
+		case "ACCEPT", "REJECT":
+			tracer.outputs = append(tracer.outputs, target)
+			return true
+
+		case "DNAT":
+			tracer.outputs = append(tracer.outputs, natDestination)
+			return true
+
+		default:
+			// We got a "-j KUBE-SOMETHING", so process that chain
+			terminated := tracer.runChain(table, target, sourceIP, destIP, destPort)
+
+			// If the subchain hit a terminal rule AND the rule that sent us
+			// to that chain was non-probabilistic, then this chain terminates
+			// as well. But if we went there because of a --probability rule,
+			// then we want to keep accumulating further matches against this
+			// chain.
+			if terminated && !isProbabilisticMatch {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+// tracePacket determines what would happen to a packet with the given sourceIP, destIP,
+// and destPort, given the indicated iptables ruleData. nodeIP is the local node IP (for
+// rules matching "LOCAL").
+//
+// The return values are: an array of matched rules (for debugging), the final packet
+// destinations (a comma-separated list of IPs, or one of the special targets "ACCEPT",
+// "DROP", or "REJECT"), and whether the packet would be masqueraded.
+func tracePacket(ruleData, sourceIP, destIP, destPort, nodeIP string) ([]string, string, bool) {
+	tracer, err := newIPTablesTracer(ruleData, nodeIP)
+	if err != nil {
+		panic("bad iptables ruleData: " + err.Error())
+	}
+
+	// nat:PREROUTING goes first, then the filter chains, then nat:POSTROUTING. For
+	// our purposes that means we run through the "nat" chains first, starting at
+	// KUBE-SERVICES, then we do the "filter" chains. The only interesting thing that
+	// happens in nat:POSTROUTING is that the masquerade mark gets turned into actual
+	// masquerading.
+
+	tracer.runChain("nat", "KUBE-SERVICES", sourceIP, destIP, destPort)
+
+	// Process pending DNAT (which theoretically might affect REJECT/ACCEPT filter rules)
+	if len(tracer.outputs) != 0 {
+		destIP = tracer.outputs[0]
+	}
+
+	// Now run the filter rules to see if the packet is REJECTed or ACCEPTed. The DROP
+	// rule is created by kubelet, not us, so we have to simulate that manually
+	if tracer.markDrop {
+		return tracer.matches, "DROP", false
+	}
+	tracer.runChain("filter", "KUBE-SERVICES", sourceIP, destIP, destPort)
+	tracer.runChain("filter", "KUBE-EXTERNAL-SERVICES", sourceIP, destIP, destPort)
+	tracer.runChain("filter", "KUBE-FORWARD", sourceIP, destIP, destPort)
+	tracer.runChain("filter", "KUBE-NODEPORTS", sourceIP, destIP, destPort)
+
+	return tracer.matches, strings.Join(tracer.outputs, ", "), tracer.markMasq
+}
+
+type packetFlowTest struct {
+	name     string
+	sourceIP string
+	destIP   string
+	destPort int
+	output   string
+	masq     bool
+}
+
+func runPacketFlowTests(t *testing.T, ruleData, nodeIP string, testCases []packetFlowTest) {
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			matches, output, masq := tracePacket(ruleData, tc.sourceIP, tc.destIP, fmt.Sprintf("%d", tc.destPort), nodeIP)
+			var errors []string
+			if output != tc.output {
+				errors = append(errors, fmt.Sprintf("wrong output: expected %q got %q", tc.output, output))
+			}
+			if masq != tc.masq {
+				errors = append(errors, fmt.Sprintf("wrong masq: expected %v got %v", tc.masq, masq))
+			}
+			if errors != nil {
+				t.Errorf("Test %q of a packet from %s to %s:%d got result:\n%s\n\nBy matching:\n%s\n\n",
+					tc.name, tc.sourceIP, tc.destIP, tc.destPort, strings.Join(errors, "\n"), strings.Join(matches, "\n"))
+			}
+		})
+	}
+}
+
 // TestOverallIPTablesRulesWithMultipleServices creates 4 types of services: ClusterIP,
 // LoadBalancer, ExternalIP and NodePort and verifies if the NAT table rules created
 // are exactly the same as what is expected. This test provides an overall view of how
@@ -1641,6 +2060,16 @@ COMMIT
 `
 
 	assertIPTablesRulesEqual(t, expected, fp.iptablesData.String())
+
+	runPacketFlowTests(t, fp.iptablesData.String(), testNodeIP, []packetFlowTest{
+		{
+			name:     "cluster IP rejected",
+			sourceIP: "10.0.0.2",
+			destIP:   "172.30.0.41",
+			destPort: 80,
+			output:   "REJECT",
+		},
+	})
 }
 
 func TestClusterIPEndpointsJump(t *testing.T) {
@@ -1714,6 +2143,25 @@ COMMIT
 `
 
 	assertIPTablesRulesEqual(t, expected, fp.iptablesData.String())
+
+	runPacketFlowTests(t, fp.iptablesData.String(), testNodeIP, []packetFlowTest{
+		{
+			name:     "cluster IP accepted",
+			sourceIP: "10.180.0.2",
+			destIP:   "172.30.0.41",
+			destPort: 80,
+			output:   "10.180.0.1:80",
+			masq:     false,
+		},
+		{
+			name:     "hairpin to cluster IP",
+			sourceIP: "10.180.0.1",
+			destIP:   "172.30.0.41",
+			destPort: 80,
+			output:   "10.180.0.1:80",
+			masq:     true,
+		},
+	})
 }
 
 func TestLoadBalancer(t *testing.T) {
@@ -1804,6 +2252,62 @@ COMMIT
 `
 
 	assertIPTablesRulesEqual(t, expected, fp.iptablesData.String())
+
+	runPacketFlowTests(t, fp.iptablesData.String(), testNodeIP, []packetFlowTest{
+		{
+			name:     "pod to cluster IP",
+			sourceIP: "10.0.0.2",
+			destIP:   svcIP,
+			destPort: svcPort,
+			output:   fmt.Sprintf("%s:%d", epIP, svcPort),
+			masq:     false,
+		},
+		{
+			name:     "external to nodePort",
+			sourceIP: testExternalClient,
+			destIP:   testNodeIP,
+			destPort: svcNodePort,
+			output:   fmt.Sprintf("%s:%d", epIP, svcPort),
+			masq:     true,
+		},
+		{
+			name:     "nodePort bypasses LoadBalancerSourceRanges",
+			sourceIP: testExternalClientBlocked,
+			destIP:   testNodeIP,
+			destPort: svcNodePort,
+			output:   fmt.Sprintf("%s:%d", epIP, svcPort),
+			masq:     true,
+		},
+		{
+			name:     "accepted external to LB",
+			sourceIP: testExternalClient,
+			destIP:   svcLBIP,
+			destPort: svcPort,
+			output:   fmt.Sprintf("%s:%d", epIP, svcPort),
+			masq:     true,
+		},
+		{
+			name:     "blocked external to LB",
+			sourceIP: testExternalClientBlocked,
+			destIP:   svcLBIP,
+			destPort: svcPort,
+			output:   "DROP",
+		},
+		{
+			name:     "pod to LB (blocked by LoadBalancerSourceRanges)",
+			sourceIP: "10.0.0.2",
+			destIP:   svcLBIP,
+			destPort: svcPort,
+			output:   "DROP",
+		},
+		{
+			name:     "node to LB (blocked by LoadBalancerSourceRanges)",
+			sourceIP: testNodeIP,
+			destIP:   svcLBIP,
+			destPort: svcPort,
+			output:   "DROP",
+		},
+	})
 }
 
 func TestNodePort(t *testing.T) {
@@ -1881,6 +2385,41 @@ COMMIT
 COMMIT
 `
 	assertIPTablesRulesEqual(t, expected, fp.iptablesData.String())
+
+	runPacketFlowTests(t, fp.iptablesData.String(), testNodeIP, []packetFlowTest{
+		{
+			name:     "pod to cluster IP",
+			sourceIP: "10.0.0.2",
+			destIP:   svcIP,
+			destPort: svcPort,
+			output:   fmt.Sprintf("%s:%d", epIP, svcPort),
+			masq:     false,
+		},
+		{
+			name:     "external to nodePort",
+			sourceIP: testExternalClient,
+			destIP:   testNodeIP,
+			destPort: svcNodePort,
+			output:   fmt.Sprintf("%s:%d", epIP, svcPort),
+			masq:     true,
+		},
+		{
+			name:     "node to nodePort",
+			sourceIP: testNodeIP,
+			destIP:   testNodeIP,
+			destPort: svcNodePort,
+			output:   fmt.Sprintf("%s:%d", epIP, svcPort),
+			masq:     true,
+		},
+		{
+			name:     "localhost to nodePort gets masqueraded",
+			sourceIP: "127.0.0.1",
+			destIP:   "127.0.0.1",
+			destPort: svcNodePort,
+			output:   fmt.Sprintf("%s:%d", epIP, svcPort),
+			masq:     true,
+		},
+	})
 }
 
 func TestHealthCheckNodePort(t *testing.T) {
@@ -1898,21 +2437,19 @@ func TestHealthCheckNodePort(t *testing.T) {
 		Protocol:       v1.ProtocolTCP,
 	}
 
-	makeServiceMap(fp,
-		makeTestService(svcPortName.Namespace, svcPortName.Name, func(svc *v1.Service) {
-			svc.Spec.Type = "LoadBalancer"
-			svc.Spec.ClusterIP = svcIP
-			svc.Spec.Ports = []v1.ServicePort{{
-				Name:     svcPortName.Port,
-				Port:     int32(svcPort),
-				Protocol: v1.ProtocolTCP,
-				NodePort: int32(svcNodePort),
-			}}
-			svc.Spec.HealthCheckNodePort = int32(svcHealthCheckNodePort)
-			svc.Spec.ExternalTrafficPolicy = v1.ServiceExternalTrafficPolicyTypeLocal
-		}),
-	)
-
+	svc := makeTestService(svcPortName.Namespace, svcPortName.Name, func(svc *v1.Service) {
+		svc.Spec.Type = "LoadBalancer"
+		svc.Spec.ClusterIP = svcIP
+		svc.Spec.Ports = []v1.ServicePort{{
+			Name:     svcPortName.Port,
+			Port:     int32(svcPort),
+			Protocol: v1.ProtocolTCP,
+			NodePort: int32(svcNodePort),
+		}}
+		svc.Spec.HealthCheckNodePort = int32(svcHealthCheckNodePort)
+		svc.Spec.ExternalTrafficPolicy = v1.ServiceExternalTrafficPolicyTypeLocal
+	})
+	makeServiceMap(fp, svc)
 	fp.syncProxyRules()
 
 	expected := `
@@ -1942,6 +2479,30 @@ COMMIT
 `
 
 	assertIPTablesRulesEqual(t, expected, fp.iptablesData.String())
+
+	runPacketFlowTests(t, fp.iptablesData.String(), testNodeIP, []packetFlowTest{
+		{
+			name:     "firewall accepts HealthCheckNodePort",
+			sourceIP: "1.2.3.4",
+			destIP:   testNodeIP,
+			destPort: svcHealthCheckNodePort,
+			output:   "ACCEPT",
+			masq:     false,
+		},
+	})
+
+	fp.OnServiceDelete(svc)
+	fp.syncProxyRules()
+
+	runPacketFlowTests(t, fp.iptablesData.String(), testNodeIP, []packetFlowTest{
+		{
+			name:     "HealthCheckNodePort no longer has any rule",
+			sourceIP: "1.2.3.4",
+			destIP:   testNodeIP,
+			destPort: svcHealthCheckNodePort,
+			output:   "",
+		},
+	})
 }
 
 func TestMasqueradeRule(t *testing.T) {
@@ -2035,6 +2596,23 @@ COMMIT
 `
 
 	assertIPTablesRulesEqual(t, expected, fp.iptablesData.String())
+
+	runPacketFlowTests(t, fp.iptablesData.String(), testNodeIP, []packetFlowTest{
+		{
+			name:     "cluster IP with no endpoints",
+			sourceIP: "10.0.0.2",
+			destIP:   svcIP,
+			destPort: svcPort,
+			output:   "REJECT",
+		},
+		{
+			name:     "external IP with no endpoints",
+			sourceIP: testExternalClient,
+			destIP:   svcExternalIPs,
+			destPort: svcPort,
+			output:   "REJECT",
+		},
+	})
 }
 
 func TestOnlyLocalExternalIPs(t *testing.T) {
@@ -2125,6 +2703,25 @@ COMMIT
 `
 
 	assertIPTablesRulesEqual(t, expected, fp.iptablesData.String())
+
+	runPacketFlowTests(t, fp.iptablesData.String(), testNodeIP, []packetFlowTest{
+		{
+			name:     "cluster IP hits both endpoints",
+			sourceIP: "10.0.0.2",
+			destIP:   svcIP,
+			destPort: svcPort,
+			output:   fmt.Sprintf("%s:%d, %s:%d", epIP1, svcPort, epIP2, svcPort),
+			masq:     false,
+		},
+		{
+			name:     "external IP hits only local endpoint, unmasqueraded",
+			sourceIP: testExternalClient,
+			destIP:   svcExternalIPs,
+			destPort: svcPort,
+			output:   fmt.Sprintf("%s:%d", epIP2, svcPort),
+			masq:     false,
+		},
+	})
 }
 
 // TestNonLocalExternalIPs tests if we add the masquerade rule into svcChain in order to
@@ -2212,6 +2809,25 @@ COMMIT
 `
 
 	assertIPTablesRulesEqual(t, expected, fp.iptablesData.String())
+
+	runPacketFlowTests(t, fp.iptablesData.String(), testNodeIP, []packetFlowTest{
+		{
+			name:     "pod to cluster IP",
+			sourceIP: "10.0.0.2",
+			destIP:   svcIP,
+			destPort: svcPort,
+			output:   fmt.Sprintf("%s:%d, %s:%d", epIP1, svcPort, epIP2, svcPort),
+			masq:     false,
+		},
+		{
+			name:     "external to external IP",
+			sourceIP: testExternalClient,
+			destIP:   svcExternalIPs,
+			destPort: svcPort,
+			output:   fmt.Sprintf("%s:%d, %s:%d", epIP1, svcPort, epIP2, svcPort),
+			masq:     true,
+		},
+	})
 }
 
 func TestNodePortReject(t *testing.T) {
@@ -2266,6 +2882,30 @@ COMMIT
 `
 
 	assertIPTablesRulesEqual(t, expected, fp.iptablesData.String())
+
+	runPacketFlowTests(t, fp.iptablesData.String(), testNodeIP, []packetFlowTest{
+		{
+			name:     "pod to cluster IP",
+			sourceIP: "10.0.0.2",
+			destIP:   svcIP,
+			destPort: svcPort,
+			output:   "REJECT",
+		},
+		{
+			name:     "pod to NodePort",
+			sourceIP: "10.0.0.2",
+			destIP:   testNodeIP,
+			destPort: svcNodePort,
+			output:   "REJECT",
+		},
+		{
+			name:     "external to NodePort",
+			sourceIP: testExternalClient,
+			destIP:   testNodeIP,
+			destPort: svcNodePort,
+			output:   "REJECT",
+		},
+	})
 }
 
 func TestLoadBalancerReject(t *testing.T) {
@@ -2334,6 +2974,30 @@ COMMIT
 `
 
 	assertIPTablesRulesEqual(t, expected, fp.iptablesData.String())
+
+	runPacketFlowTests(t, fp.iptablesData.String(), testNodeIP, []packetFlowTest{
+		{
+			name:     "pod to cluster IP",
+			sourceIP: "10.0.0.2",
+			destIP:   svcIP,
+			destPort: svcPort,
+			output:   "REJECT",
+		},
+		{
+			name:     "pod to LoadBalancer IP",
+			sourceIP: "10.0.0.2",
+			destIP:   svcLBIP,
+			destPort: svcPort,
+			output:   "REJECT",
+		},
+		{
+			name:     "external to LoadBalancer IP",
+			sourceIP: testExternalClient,
+			destIP:   svcLBIP,
+			destPort: svcPort,
+			output:   "REJECT",
+		},
+	})
 }
 
 func TestOnlyLocalLoadBalancing(t *testing.T) {
@@ -2445,6 +3109,35 @@ COMMIT
 `
 
 	assertIPTablesRulesEqual(t, expected, fp.iptablesData.String())
+
+	fp.syncProxyRules()
+
+	runPacketFlowTests(t, fp.iptablesData.String(), testNodeIP, []packetFlowTest{
+		{
+			name:     "pod to cluster IP hits both endpoints",
+			sourceIP: "10.0.0.2",
+			destIP:   svcIP,
+			destPort: svcPort,
+			output:   fmt.Sprintf("%s:%d, %s:%d", epIP1, svcPort, epIP2, svcPort),
+			masq:     false,
+		},
+		{
+			name:     "external to LB IP hits only local endpoint, unmasqueraded",
+			sourceIP: testExternalClient,
+			destIP:   svcLBIP,
+			destPort: svcPort,
+			output:   fmt.Sprintf("%s:%d", epIP2, svcPort),
+			masq:     false,
+		},
+		{
+			name:     "external to NodePort hits only local endpoint, unmasqueraded",
+			sourceIP: testExternalClient,
+			destIP:   testNodeIP,
+			destPort: svcNodePort,
+			output:   fmt.Sprintf("%s:%d", epIP2, svcPort),
+			masq:     false,
+		},
+	})
 }
 
 func TestOnlyLocalNodePortsNoClusterCIDR(t *testing.T) {
@@ -2590,6 +3283,59 @@ func onlyLocalNodePorts(t *testing.T, fp *Proxier, ipt *iptablestest.FakeIPTable
 	fp.syncProxyRules()
 
 	assertIPTablesRulesEqual(t, expected, fp.iptablesData.String())
+
+	runPacketFlowTests(t, fp.iptablesData.String(), testNodeIP, []packetFlowTest{
+		{
+			name:     "pod to cluster IP hit both endpoints",
+			sourceIP: "10.0.0.2",
+			destIP:   svcIP,
+			destPort: svcPort,
+			output:   fmt.Sprintf("%s:%d, %s:%d", epIP1, svcPort, epIP2, svcPort),
+			masq:     false,
+		},
+		{
+			name:     "external to NodePort hits only local endpoint",
+			sourceIP: testExternalClient,
+			destIP:   testNodeIP,
+			destPort: svcNodePort,
+			output:   fmt.Sprintf("%s:%d", epIP2, svcPort),
+			masq:     false,
+		},
+		{
+			name:     "pod to localhost doesn't work because localhost is not in nodePortAddresses",
+			sourceIP: "10.0.0.2",
+			destIP:   "127.0.0.1",
+			destPort: svcNodePort,
+			output:   "",
+		},
+	})
+
+	if fp.localDetector.IsImplemented() {
+		// pod-to-NodePort is treated as internal traffic, so we see both endpoints
+		runPacketFlowTests(t, fp.iptablesData.String(), testNodeIP, []packetFlowTest{
+			{
+				name:     "pod to NodePort hits both endpoints",
+				sourceIP: "10.0.0.2",
+				destIP:   testNodeIP,
+				destPort: svcNodePort,
+				output:   fmt.Sprintf("%s:%d, %s:%d", epIP1, svcPort, epIP2, svcPort),
+				masq:     false,
+			},
+		})
+	} else {
+		// pod-to-NodePort is (incorrectly) treated as external traffic
+		// when there is no LocalTrafficDetector.
+		runPacketFlowTests(t, fp.iptablesData.String(), testNodeIP, []packetFlowTest{
+			{
+				name:     "pod to NodePort hits only local endpoint",
+				sourceIP: "10.0.0.2",
+				destIP:   testNodeIP,
+				destPort: svcNodePort,
+				output:   fmt.Sprintf("%s:%d", epIP2, svcPort),
+				masq:     false,
+			},
+		})
+	}
 }
 
 func TestComputeProbability(t *testing.T) {
@@ -4270,6 +5016,7 @@ COMMIT
 		endpoints                 []endpoint
 		expectEndpointRule        bool
 		expectedIPTablesWithSlice string
+		flowTests                 []packetFlowTest
 	}{
 		{
 			name:                  "internalTrafficPolicy is cluster",
@@ -4282,6 +5029,16 @@ COMMIT
 			},
 			expectEndpointRule:        true,
 			expectedIPTablesWithSlice: clusterExpectedIPTables,
+			flowTests: []packetFlowTest{
+				{
+					name:     "pod to ClusterIP hits all endpoints",
+					sourceIP: "10.0.0.2",
+					destIP:   "172.30.1.1",
+					destPort: 80,
+					output:   "10.0.1.1:80, 10.0.1.2:80, 10.0.1.3:80",
+					masq:     false,
+				},
+			},
 		},
 		{
 			name:                  "internalTrafficPolicy is local and there are local endpoints",
@@ -4322,6 +5079,16 @@ COMMIT
 -A KUBE-SERVICES -m comment --comment "kubernetes service nodeports; NOTE: this must be the last rule in this chain" -m addrtype --dst-type LOCAL -j KUBE-NODEPORTS
 COMMIT
 `,
+			flowTests: []packetFlowTest{
+				{
+					name:     "pod to ClusterIP hits only local endpoint",
+					sourceIP: "10.0.0.2",
+					destIP:   "172.30.1.1",
+					destPort: 80,
+					output:   "10.0.1.1:80",
+					masq:     false,
+				},
+			},
 		},
 		{
 			name:                  "internalTrafficPolicy is local and there are no local endpoints",
@@ -4356,6 +5123,15 @@ COMMIT
 -A KUBE-SERVICES -m comment --comment "kubernetes service nodeports; NOTE: this must be the last rule in this chain" -m addrtype --dst-type LOCAL -j KUBE-NODEPORTS
 COMMIT
 `,
+			flowTests: []packetFlowTest{
+				{
+					name:     "no endpoints",
+					sourceIP: "10.0.0.2",
+					destIP:   "172.30.1.1",
+					destPort: 80,
+					output:   "REJECT",
+				},
+			},
 		},
 		{
 			name:                  "Local internalTrafficPolicy is ignored when feature gate is off",
@@ -4368,6 +5144,16 @@ COMMIT
 			},
 			expectEndpointRule:        false,
 			expectedIPTablesWithSlice: clusterExpectedIPTables,
+			flowTests: []packetFlowTest{
+				{
+					name:     "pod to ClusterIP hits all endpoints",
+					sourceIP: "10.0.0.2",
+					destIP:   "172.30.1.1",
+					destPort: 80,
+					output:   "10.0.1.1:80, 10.0.1.2:80, 10.0.1.3:80",
+					masq:     false,
+				},
+			},
 		},
 	}
 
@@ -4421,12 +5207,22 @@ COMMIT
 			fp.OnEndpointSliceAdd(endpointSlice)
 			fp.syncProxyRules()
 			assertIPTablesRulesEqual(t, tc.expectedIPTablesWithSlice, fp.iptablesData.String())
+			runPacketFlowTests(t, fp.iptablesData.String(), testNodeIP, tc.flowTests)
 
+			fp.OnEndpointSliceDelete(endpointSlice)
+			fp.syncProxyRules()
 			if tc.expectEndpointRule {
-				fp.OnEndpointSliceDelete(endpointSlice)
-				fp.syncProxyRules()
 				assertIPTablesRulesNotEqual(t, tc.expectedIPTablesWithSlice, fp.iptablesData.String())
 			}
+			runPacketFlowTests(t, fp.iptablesData.String(), testNodeIP, []packetFlowTest{
+				{
+					name:     "endpoints deleted",
+					sourceIP: "10.0.0.2",
+					destIP:   "172.30.1.1",
+					destPort: 80,
+					output:   "REJECT",
+				},
+			})
 		})
 	}
 }
@@ -4474,6 +5270,7 @@ func Test_EndpointSliceWithTerminatingEndpoints(t *testing.T) {
 		endpointslice          *discovery.EndpointSlice
 		expectedIPTables       string
 		noUsableEndpoints      bool
+		flowTests              []packetFlowTest
 	}{
 		{
 			name:                   "feature gate ProxyTerminatingEndpoints enabled, ready endpoints exist",
@@ -4594,6 +5391,24 @@ COMMIT
 -A KUBE-SERVICES -m comment --comment "kubernetes service nodeports; NOTE: this must be the last rule in this chain" -m addrtype --dst-type LOCAL -j KUBE-NODEPORTS
 COMMIT
 `,
+			flowTests: []packetFlowTest{
+				{
+					name:     "pod to clusterIP",
+					sourceIP: "10.0.0.2",
+					destIP:   "172.30.1.1",
+					destPort: 80,
+					output:   "10.0.1.1:80, 10.0.1.2:80, 10.0.1.5:80",
+					masq:     false,
+				},
+				{
+					name:     "external to LB",
+					sourceIP: testExternalClient,
+					destIP:   "1.2.3.4",
+					destPort: 80,
+					output:   "10.0.1.1:80, 10.0.1.2:80",
+					masq:     false,
+				},
+			},
 		},
 		{
 			name:                   "feature gate ProxyTerminatingEndpoints disabled, ready endpoints exist",
@@ -4714,6 +5529,24 @@ COMMIT
 -A KUBE-SERVICES -m comment --comment "kubernetes service nodeports; NOTE: this must be the last rule in this chain" -m addrtype --dst-type LOCAL -j KUBE-NODEPORTS
 COMMIT
 `,
+			flowTests: []packetFlowTest{
+				{
+					name:     "pod to clusterIP",
+					sourceIP: "10.0.0.2",
+					destIP:   "172.30.1.1",
+					destPort: 80,
+					output:   "10.0.1.1:80, 10.0.1.2:80, 10.0.1.5:80",
+					masq:     false,
+				},
+				{
+					name:     "external to LB",
+					sourceIP: testExternalClient,
+					destIP:   "1.2.3.4",
+					destPort: 80,
+					output:   "10.0.1.1:80, 10.0.1.2:80",
+					masq:     false,
+				},
+			},
 		},
 		{
 			name:                   "feature gate ProxyTerminatingEndpoints enabled, only terminating endpoints exist",
@@ -4822,6 +5655,24 @@ COMMIT
 -A KUBE-SERVICES -m comment --comment "kubernetes service nodeports; NOTE: this must be the last rule in this chain" -m addrtype --dst-type LOCAL -j KUBE-NODEPORTS
 COMMIT
 `,
+			flowTests: []packetFlowTest{
+				{
+					name:     "pod to clusterIP",
+					sourceIP: "10.0.0.2",
+					destIP:   "172.30.1.1",
+					destPort: 80,
+					output:   "10.0.1.5:80",
+					masq:     false,
+				},
+				{
+					name:     "external to LB",
+					sourceIP: testExternalClient,
+					destIP:   "1.2.3.4",
+					destPort: 80,
+					output:   "10.0.1.2:80, 10.0.1.3:80",
+					masq:     false,
+				},
+			},
 		},
 		{
 			name:                   "with ProxyTerminatingEndpoints disabled, only non-local and terminating endpoints exist",
@@ -4926,6 +5777,23 @@ COMMIT
 -A KUBE-SERVICES -m comment --comment "kubernetes service nodeports; NOTE: this must be the last rule in this chain" -m addrtype --dst-type LOCAL -j KUBE-NODEPORTS
 COMMIT
 `,
+			flowTests: []packetFlowTest{
+				{
+					name:     "pod to clusterIP",
+					sourceIP: "10.0.0.2",
+					destIP:   "172.30.1.1",
+					destPort: 80,
+					output:   "10.0.1.5:80",
+					masq:     false,
+				},
+				{
+					name:     "external to LB",
+					sourceIP: testExternalClient,
+					destIP:   "1.2.3.4",
+					destPort: 80,
+					output:   "DROP",
+				},
+			},
 		},
 		{
 			name:                   "ProxyTerminatingEndpoints enabled, terminating endpoints on remote node",
@@ -4991,6 +5859,22 @@ COMMIT
 -A KUBE-SERVICES -m comment --comment "kubernetes service nodeports; NOTE: this must be the last rule in this chain" -m addrtype --dst-type LOCAL -j KUBE-NODEPORTS
 COMMIT
 `,
+			flowTests: []packetFlowTest{
+				{
+					name:     "pod to clusterIP, no internally-usable endpoints",
+					sourceIP: "10.0.0.2",
+					destIP:   "172.30.1.1",
+					destPort: 80,
+					output:   "",
+				},
+				{
+					name:     "external to LB, no locally-usable endpoints",
+					sourceIP: testExternalClient,
+					destIP:   "1.2.3.4",
+					destPort: 80,
+					output:   "DROP",
+				},
+			},
 		},
 		{
 			name:                   "no usable endpoints on any node",
@@ -5056,6 +5940,22 @@ COMMIT
 -A KUBE-SERVICES -m comment --comment "kubernetes service nodeports; NOTE: this must be the last rule in this chain" -m addrtype --dst-type LOCAL -j KUBE-NODEPORTS
 COMMIT
 `,
+			flowTests: []packetFlowTest{
+				{
+					name:     "pod to clusterIP, no usable endpoints",
+					sourceIP: "10.0.0.2",
+					destIP:   "172.30.1.1",
+					destPort: 80,
+					output:   "REJECT",
+				},
+				{
+					name:     "external to LB, no usable endpoints",
+					sourceIP: testExternalClient,
+					destIP:   "1.2.3.4",
+					destPort: 80,
+					output:   "REJECT",
+				},
+			},
 		},
 	}
 
@@ -5074,6 +5974,7 @@ COMMIT
 			fp.syncProxyRules()
 			t.Log(fp.iptablesData.String())
 			assertIPTablesRulesEqual(t, testcase.expectedIPTables, fp.iptablesData.String())
+			runPacketFlowTests(t, fp.iptablesData.String(), testNodeIP, testcase.flowTests)
 
 			fp.OnEndpointSliceDelete(testcase.endpointslice)
 			fp.syncProxyRules()
@@ -5083,6 +5984,22 @@ COMMIT
 			} else {
 				assertIPTablesRulesNotEqual(t, testcase.expectedIPTables, fp.iptablesData.String())
 			}
+			runPacketFlowTests(t, fp.iptablesData.String(), testNodeIP, []packetFlowTest{
+				{
+					name:     "pod to clusterIP after endpoints deleted",
+					sourceIP: "10.0.0.2",
+					destIP:   "172.30.1.1",
+					destPort: 80,
+					output:   "REJECT",
+				},
+				{
+					name:     "external to LB after endpoints deleted",
+					sourceIP: testExternalClient,
+					destIP:   "1.2.3.4",
+					destPort: 80,
+					output:   "REJECT",
+				},
+			})
 		})
 	}
 }
@@ -5163,6 +6080,41 @@ COMMIT
 `
 
 	assertIPTablesRulesEqual(t, expected, fp.iptablesData.String())
+
+	runPacketFlowTests(t, fp.iptablesData.String(), testNodeIP, []packetFlowTest{
+		{
+			name:     "pod to cluster IP",
+			sourceIP: "10.0.0.2",
+			destIP:   "172.30.0.41",
+			destPort: 80,
+			output:   "10.180.0.1:80",
+			masq:     true,
+		},
+		{
+			name:     "pod to LB",
+			sourceIP: "10.0.0.2",
+			destIP:   "1.2.3.4",
+			destPort: 80,
+			output:   "10.180.0.1:80",
+			masq:     true,
+		},
+		{
+			name:     "external to cluster IP",
+			sourceIP: testExternalClient,
+			destIP:   "172.30.0.41",
+			destPort: 80,
+			output:   "10.180.0.1:80",
+			masq:     true,
+		},
+		{
+			name:     "external to LB",
+			sourceIP: testExternalClient,
+			destIP:   "1.2.3.4",
+			destPort: 80,
+			output:   "10.180.0.1:80",
+			masq:     true,
+		},
+	})
 }
 
 func countEndpointsAndComments(iptablesData string, matchEndpoint string) (string, int, int) {
