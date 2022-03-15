@@ -985,6 +985,9 @@ func (proxier *Proxier) syncProxyRules() {
 		}
 	}
 
+	serviceNoEndpointsTotalInternal := 0
+	serviceNoEndpointsTotalExternal := 0
+
 	// Build rules for each service.
 	for svcName, svc := range proxier.serviceMap {
 		svcInfo, ok := svc.(*serviceInfo)
@@ -1083,6 +1086,10 @@ func (proxier *Proxier) syncProxyRules() {
 			// DNAT to final destination.
 			args = append(args, "-m", protocol, "-p", protocol, "-j", "DNAT", "--to-destination", epInfo.Endpoint)
 			proxier.natRules.Write(args)
+		}
+
+		if len(readyEndpointChains) == 0 {
+			serviceNoEndpointsTotalInternal++
 		}
 
 		svcChain := svcInfo.servicePortChainName
@@ -1423,6 +1430,8 @@ func (proxier *Proxier) syncProxyRules() {
 				string(KubeMarkDropChain),
 			)
 			proxier.natRules.Write(args)
+
+			serviceNoEndpointsTotalExternal++
 		} else {
 			// Write rules jumping from svcXlbChain to localEndpointChains
 			proxier.writeServiceToEndpointRules(svcNameString, svcInfo, svcXlbChain, localEndpointChains, args)
@@ -1551,6 +1560,24 @@ func (proxier *Proxier) syncProxyRules() {
 			klog.V(4).InfoS("Network programming", "endpoint", klog.KRef(name.Namespace, name.Name), "elapsed", latency)
 		}
 	}
+
+	externalTrafficPolicyLabelValue := "cluster"
+	if svc.NodeLocalExternal() {
+		externalTrafficPolicyLabelValue = "local"
+	}
+
+	internalTrafficPolicyLabelValue := "cluster"
+	if svc.NodeLocalInternal() {
+		externalTrafficPolicyLabelValue = "local"
+	}
+
+	metrics.ServiceNoEndpointsTotal.
+		With(map[string]string{"internal_traffic_policy": internalTrafficPolicyLabelValue}).
+		Set(serviceNoEndpointsTotalInternal)
+
+	metrics.ServiceNoEndpointsTotal.
+		With(map[string]string{"external_traffic_policy": externalTrafficPolicyLabelValue}).
+		Set(serviceNoEndpointsTotalExternal)
 
 	// Close old local ports and save new ones.
 	for k, v := range proxier.portsMap {

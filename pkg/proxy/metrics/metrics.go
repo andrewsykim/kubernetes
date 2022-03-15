@@ -115,6 +115,18 @@ var (
 		},
 	)
 
+	// ServiceNoEndpointsTotal is the number of services with
+	// no endpoints.
+	ServiceNoEndpointsTotal = metrics.NewGaugeVec(
+		&metrics.GaugeOpts{
+			Subsystem:      kubeProxySubsystem,
+			Name:           "sync_proxy_rules_service_no_endpoints_total",
+			Help:           "Current Services with no endpoints",
+			StabilityLevel: metrics.ALPHA,
+		},
+		[]string{"internal_traffic_policy", "external_traffic_policy"},
+	)
+
 	// IptablesRestoreFailuresTotal is the number of iptables restore failures that the proxy has
 	// seen.
 	IptablesRestoreFailuresTotal = metrics.NewCounter(
@@ -165,6 +177,7 @@ func RegisterMetrics() {
 		legacyregistry.MustRegister(IptablesRulesTotal)
 		legacyregistry.MustRegister(IptablesRestoreFailuresTotal)
 		legacyregistry.MustRegister(SyncProxyRulesLastQueuedTimestamp)
+		legacyregistry.MustRegister(ServiceNoEndpointsTotal)
 	})
 }
 
