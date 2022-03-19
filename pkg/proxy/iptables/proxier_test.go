@@ -4284,7 +4284,7 @@ COMMIT
 			expectedIPTablesWithSlice: clusterExpectedIPTables,
 		},
 		{
-			name:                  "internalTrafficPolicy is local and there is non-zero local endpoints",
+			name:                  "internalTrafficPolicy is local and there are local endpoints",
 			internalTrafficPolicy: &local,
 			featureGateOn:         true,
 			endpoints: []endpoint{
@@ -4324,7 +4324,7 @@ COMMIT
 `,
 		},
 		{
-			name:                  "internalTrafficPolicy is local and there is zero local endpoint",
+			name:                  "internalTrafficPolicy is local and there are no local endpoints",
 			internalTrafficPolicy: &local,
 			featureGateOn:         true,
 			endpoints: []endpoint{
@@ -4358,7 +4358,7 @@ COMMIT
 `,
 		},
 		{
-			name:                  "internalTrafficPolicy is local and there is non-zero local endpoint with feature gate off",
+			name:                  "Local internalTrafficPolicy is ignored when feature gate is off",
 			internalTrafficPolicy: &local,
 			featureGateOn:         false,
 			endpoints: []endpoint{
@@ -4510,7 +4510,7 @@ func Test_EndpointSliceWithTerminatingEndpoints(t *testing.T) {
 						NodeName: utilpointer.StringPtr(testHostname),
 					},
 					{
-						// this endpoint should be ignored for node ports since there are ready non-terminating endpoints
+						// this endpoint should be ignored for external since there are ready non-terminating endpoints
 						Addresses: []string{"10.0.1.3"},
 						Conditions: discovery.EndpointConditions{
 							Ready:       utilpointer.BoolPtr(false),
@@ -4520,7 +4520,7 @@ func Test_EndpointSliceWithTerminatingEndpoints(t *testing.T) {
 						NodeName: utilpointer.StringPtr(testHostname),
 					},
 					{
-						// this endpoint should be ignored for node ports since there are ready non-terminating endpoints
+						// this endpoint should be ignored for external since there are ready non-terminating endpoints
 						Addresses: []string{"10.0.1.4"},
 						Conditions: discovery.EndpointConditions{
 							Ready:       utilpointer.BoolPtr(false),
@@ -4530,7 +4530,7 @@ func Test_EndpointSliceWithTerminatingEndpoints(t *testing.T) {
 						NodeName: utilpointer.StringPtr(testHostname),
 					},
 					{
-						// this endpoint should be ignored for node ports since it's not local
+						// this endpoint should be ignored for external since it's not local
 						Addresses: []string{"10.0.1.5"},
 						Conditions: discovery.EndpointConditions{
 							Ready:       utilpointer.BoolPtr(true),
@@ -4630,7 +4630,7 @@ COMMIT
 						NodeName: utilpointer.StringPtr(testHostname),
 					},
 					{
-						// this endpoint should be ignored for node ports since there are ready non-terminating endpoints
+						// this endpoint should be ignored since it is not ready and the feature gate is off
 						Addresses: []string{"10.0.1.3"},
 						Conditions: discovery.EndpointConditions{
 							Ready:       utilpointer.BoolPtr(false),
@@ -4640,7 +4640,7 @@ COMMIT
 						NodeName: utilpointer.StringPtr(testHostname),
 					},
 					{
-						// this endpoint should be ignored for node ports since there are ready non-terminating endpoints
+						// this endpoint should be ignored since it is not ready and the feature gate is off
 						Addresses: []string{"10.0.1.4"},
 						Conditions: discovery.EndpointConditions{
 							Ready:       utilpointer.BoolPtr(false),
@@ -4650,7 +4650,7 @@ COMMIT
 						NodeName: utilpointer.StringPtr(testHostname),
 					},
 					{
-						// this endpoint should be ignored for node ports since it's not local
+						// this endpoint should be ignored for external since it's not local
 						Addresses: []string{"10.0.1.5"},
 						Conditions: discovery.EndpointConditions{
 							Ready:       utilpointer.BoolPtr(true),
@@ -4762,7 +4762,7 @@ COMMIT
 						NodeName: utilpointer.StringPtr(testHostname),
 					},
 					{
-						// this endpoint should be ignored for node ports since it's not local
+						// this endpoint should be ignored for external since it's not local
 						Addresses: []string{"10.0.1.5"},
 						Conditions: discovery.EndpointConditions{
 							Ready:       utilpointer.BoolPtr(true),
@@ -4824,7 +4824,7 @@ COMMIT
 `,
 		},
 		{
-			name:                   "with ProxyTerminatingEndpoints disabled, only terminating endpoints exist",
+			name:                   "with ProxyTerminatingEndpoints disabled, only non-local and terminating endpoints exist",
 			terminatingFeatureGate: false,
 			endpointslice: &discovery.EndpointSlice{
 				ObjectMeta: metav1.ObjectMeta{
