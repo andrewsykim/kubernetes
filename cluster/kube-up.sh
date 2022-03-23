@@ -24,6 +24,8 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
+echo "[ANDREW] testing"
+
 KUBE_ROOT=$(dirname "${BASH_SOURCE[0]}")/..
 
 if [ -f "${KUBE_ROOT}/cluster/env.sh" ]; then
