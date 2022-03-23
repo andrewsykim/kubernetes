@@ -2153,7 +2153,7 @@ function start-kube-controller-manager {
   params+=("--service-account-private-key-file=${SERVICEACCOUNT_KEY_PATH}")
   params+=("--volume-host-allow-local-loopback=false")
 
-  if [[ -n "${KUBE_ENABLE_EXTERNAL_GCP_CLOUD_PROVIDER:-}" ]]; then
+  if [[ "${KUBE_ENABLE_EXTERNAL_GCP_CLOUD_PROVIDER:-false}" == "true" ]]; then
     params+=("--cloud-provider=external")
   else
     params+=("--cloud-provider=${CLOUD_PROVIDER_FLAG:-gce}")
