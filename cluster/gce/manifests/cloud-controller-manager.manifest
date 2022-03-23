@@ -23,7 +23,6 @@
 "containers":[
     {
     "name": "cloud-controller-manager",
-    "image": "{{pillar['kube_docker_registry']}}/cloud-controller-manager:{{pillar['cloud-controller-manager_docker_tag']}}",
     "image": "gcr.io/k8s-image-staging/gcp-controller-manager:latest",
     "resources": {
       "requests": {
