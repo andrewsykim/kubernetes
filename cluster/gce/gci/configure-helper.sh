@@ -2855,7 +2855,7 @@ EOF
   fi
 
   if [[ "${KUBE_ENABLE_EXTERNAL_GCP_CLOUD_PROVIDER:-false}" == "true" ]]; then
-    setup-addon-manifests "addons" "cloud-provider-gcp"
+    setup-addon-manifests "addons" "cloud-controller-manager"
   fi
 
   if [[ "${ENABLE_CLUSTER_DNS:-}" == "true" ]]; then
