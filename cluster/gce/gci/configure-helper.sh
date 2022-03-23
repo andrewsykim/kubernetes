@@ -2299,8 +2299,8 @@ function start-cloud-controller-manager {
   fi
 
   params="$(convert-manifest-params "${params}")"
-  # local kube_rc_docker_tag=$(cat /home/kubernetes/kube-docker-files/cloud-controller-manager.docker_tag)
-  # kube_rc_docker_tag=$(echo ${kube_rc_docker_tag} | sed 's/+/-/g')
+  local kube_rc_docker_tag=$(cat /home/kubernetes/kube-docker-files/cloud-controller-manager.docker_tag)
+  kube_rc_docker_tag=$(echo ${kube_rc_docker_tag} | sed 's/+/-/g')
   local container_env=""
   if [[ -n "${ENABLE_CACHE_MUTATION_DETECTOR:-}" ]]; then
     container_env="\"env\":[{\"name\": \"KUBE_CACHE_MUTATION_DETECTOR\", \"value\": \"${ENABLE_CACHE_MUTATION_DETECTOR}\"}],"
