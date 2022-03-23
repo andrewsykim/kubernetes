@@ -71,6 +71,12 @@ function start-kube-apiserver {
   params+=" --cloud-provider=${CLOUD_PROVIDER_FLAG:-gce}"
   params+=" --client-ca-file=${CA_CERT_BUNDLE_PATH}"
 
+  if [[ -n "${KUBE_ENABLE_EXTERNAL_GCP_CLOUD_PROVIDER:-}" ]]; then
+    params+=" --cloud-provider=external"
+  else
+    params+=" --cloud-provider=${CLOUD_PROVIDER_FLAG:-gce}"
+  fi
+
   # params is passed by reference, so no "$"
   configure-etcd-params params
 

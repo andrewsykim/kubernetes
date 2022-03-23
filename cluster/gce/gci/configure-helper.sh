@@ -2145,11 +2145,16 @@ function start-kube-controller-manager {
   local params=("${CONTROLLER_MANAGER_TEST_LOG_LEVEL:-"--v=2"}" "${CONTROLLER_MANAGER_TEST_ARGS:-}" "${CLOUD_CONFIG_OPT}")
   local config_path='/etc/srv/kubernetes/kube-controller-manager/kubeconfig'
   params+=("--use-service-account-credentials")
-  params+=("--cloud-provider=${CLOUD_PROVIDER_FLAG:-gce}")
   params+=("--kubeconfig=${config_path}" "--authentication-kubeconfig=${config_path}" "--authorization-kubeconfig=${config_path}")
   params+=("--root-ca-file=${CA_CERT_BUNDLE_PATH}")
   params+=("--service-account-private-key-file=${SERVICEACCOUNT_KEY_PATH}")
   params+=("--volume-host-allow-local-loopback=false")
+
+  if [[ -n "${KUBE_ENABLE_EXTERNAL_GCP_CLOUD_PROVIDER:-}" ]]; then
+    params+=("--cloud-provider=external")
+  else
+    params+=("--cloud-provider=${CLOUD_PROVIDER_FLAG:-gce}")
+  fi
   if [[ -n "${ENABLE_GARBAGE_COLLECTOR:-}" ]]; then
     params+=("--enable-garbage-collector=${ENABLE_GARBAGE_COLLECTOR}")
   fi
@@ -2225,6 +2230,99 @@ function start-kube-controller-manager {
   if [[ -n "${KUBE_CONTROLLER_MANAGER_RUNASUSER:-}" && -n "${KUBE_CONTROLLER_MANAGER_RUNASGROUP:-}" ]]; then
     sed -i -e "s@{{runAsUser}}@\"runAsUser\": ${KUBE_CONTROLLER_MANAGER_RUNASUSER},@g" "${src_file}"
     sed -i -e "s@{{runAsGroup}}@\"runAsGroup\":${KUBE_CONTROLLER_MANAGER_RUNASGROUP},@g" "${src_file}"
+    sed -i -e "s@{{supplementalGroups}}@\"supplementalGroups\": [ ${KUBE_PKI_READERS_GROUP} ],@g" "${src_file}"
+  else
+    sed -i -e "s@{{runAsUser}}@@g" "${src_file}"
+    sed -i -e "s@{{runAsGroup}}@@g" "${src_file}"
+    sed -i -e "s@{{supplementalGroups}}@@g" "${src_file}"
+  fi
+
+  cp "${src_file}" /etc/kubernetes/manifests
+}
+
+# Starts cloud controller manager.
+# It prepares the log file, loads the docker image, calculates variables, sets them
+# in the manifest file, and then copies the manifest file to /etc/kubernetes/manifests.
+#
+# Assumed vars (which are calculated in function compute-master-manifest-variables)
+#   CLOUD_CONFIG_OPT
+#   CLOUD_CONFIG_VOLUME
+#   CLOUD_CONFIG_MOUNT
+#   DOCKER_REGISTRY
+function start-cloud-controller-manager {
+  echo "Start cloud provider controller-manager"
+  setup-addon-manifests "addons" "cloud-controller-manager"
+
+  create-kubeconfig "cloud-controller-manager" ${CLOUD_CONTROLLER_MANAGER_TOKEN}
+  prepare-log-file /var/log/cloud-controller-manager.log "${CLOUD_CONTROLLER_MANAGER_RUNASUSER:-0}"
+  # Calculate variables and assemble the command line.
+  local params="${CONTROLLER_MANAGER_TEST_LOG_LEVEL:-"--v=4"} ${CONTROLLER_MANAGER_TEST_ARGS:-} ${CLOUD_CONFIG_OPT}"
+  params+=" --port=10253"
+  params+=" --use-service-account-credentials"
+  params+=" --cloud-provider=gce"
+  params+=" --kubeconfig=/etc/srv/kubernetes/cloud-controller-manager/kubeconfig"
+  if [[ -n "${INSTANCE_PREFIX:-}" ]]; then
+    params+=" --cluster-name=${INSTANCE_PREFIX}"
+  fi
+  if [[ -n "${CLUSTER_IP_RANGE:-}" ]]; then
+    params+=" --cluster-cidr=${CLUSTER_IP_RANGE}"
+  fi
+  if [[ -n "${CONCURRENT_SERVICE_SYNCS:-}" ]]; then
+    params+=" --concurrent-service-syncs=${CONCURRENT_SERVICE_SYNCS}"
+  fi
+  if [[ "${NETWORK_PROVIDER:-}" == "kubenet" ]]; then
+    params+=" --allocate-node-cidrs=true"
+  elif [[ -n "${ALLOCATE_NODE_CIDRS:-}" ]]; then
+    params+=" --allocate-node-cidrs=${ALLOCATE_NODE_CIDRS}"
+  fi
+  if [[ "${ENABLE_IP_ALIASES:-}" == 'true' ]]; then
+    params+=" --cidr-allocator-type=${NODE_IPAM_MODE}"
+    params+=" --configure-cloud-routes=false"
+  fi
+  if [[ -n "${FEATURE_GATES:-}" ]]; then
+    # remove non-GCP feature gates, since the CCM will early exit
+    # if given a feature gate it doesn't recognize
+    local safe_feature_gates=$(echo "${FEATURE_GATES}" | grep --perl-regexp -o "((${GCP_FEATURE_GATE_FILTER})=(true|false),*)" | tr -d "\n") 
+    if [[ -n "${safe_feature_gates:-}" ]]; then
+      params+=" --feature-gates=${safe_feature_gates}"
+      local filtered_feature_gates=$(echo "${FEATURE_GATES}" | sed "s/,/\n/g" | grep --perl-regexp -v "((${GCP_FEATURE_GATE_FILTER})=(true|false),*)" | sed -z "s/\n/,/g;s/,$/\n/")
+      echo "Feature gates that did not pass through the GCP filter:" ${filtered_feature_gates}
+    else
+      echo "None of the given feature gates (${FEATURE_GATES}) were found to be safe to pass to the CCM"
+    fi
+  fi
+  if [[ -n "${RUN_CONTROLLERS:-}" ]]; then
+    params+=" --controllers=${RUN_CONTROLLERS}"
+  fi
+
+  params="$(convert-manifest-params "${params}")"
+  local kube_rc_docker_tag=$(cat /home/kubernetes/kube-docker-files/cloud-controller-manager.docker_tag)
+  kube_rc_docker_tag=$(echo ${kube_rc_docker_tag} | sed 's/+/-/g')
+  local container_env=""
+  if [[ -n "${ENABLE_CACHE_MUTATION_DETECTOR:-}" ]]; then
+    container_env="\"env\":[{\"name\": \"KUBE_CACHE_MUTATION_DETECTOR\", \"value\": \"${ENABLE_CACHE_MUTATION_DETECTOR}\"}],"
+  fi
+
+  local -r src_file="${KUBE_HOME}/kube-manifests/kubernetes/gci-trusty/cloud-controller-manager.manifest"
+  # Evaluate variables.
+  sed -i -e "s@{{pillar\['kube_docker_registry'\]}}@${DOCKER_REGISTRY}@g" "${src_file}"
+  sed -i -e "s@{{pillar\['cloud-controller-manager_docker_tag'\]}}@${kube_rc_docker_tag}@g" "${src_file}"
+  sed -i -e "s@{{params}}@${params}@g" "${src_file}"
+  sed -i -e "s@{{container_env}}@${container_env}@g" ${src_file}
+  sed -i -e "s@{{cloud_config_mount}}@${CLOUD_CONFIG_MOUNT}@g" "${src_file}"
+  sed -i -e "s@{{cloud_config_volume}}@${CLOUD_CONFIG_VOLUME}@g" "${src_file}"
+  sed -i -e "s@{{additional_cloud_config_mount}}@@g" "${src_file}"
+  sed -i -e "s@{{additional_cloud_config_volume}}@@g" "${src_file}"
+  sed -i -e "s@{{pv_recycler_mount}}@${PV_RECYCLER_MOUNT}@g" "${src_file}"
+  sed -i -e "s@{{pv_recycler_volume}}@${PV_RECYCLER_VOLUME}@g" "${src_file}"
+  sed -i -e "s@{{flexvolume_hostpath_mount}}@${FLEXVOLUME_HOSTPATH_MOUNT}@g" "${src_file}"
+  sed -i -e "s@{{flexvolume_hostpath}}@${FLEXVOLUME_HOSTPATH_VOLUME}@g" "${src_file}"
+  sed -i -e "s@{{cpurequest}}@${CLOUD_CONTROLLER_MANAGER_CPU_REQUEST}@g" "${src_file}"
+
+  if [[ -n "${CLOUD_CONTROLLER_MANAGER_RUNASUSER:-}" && -n "${CLOUD_CONTROLLER_MANAGER_RUNASGROUP:-}" ]]; then
+    #run-cloud-controller-manager-as-non-root
+    sed -i -e "s@{{runAsUser}}@\"runAsUser\": ${CLOUD_CONTROLLER_MANAGER_RUNASUSER},@g" "${src_file}"
+    sed -i -e "s@{{runAsGroup}}@\"runAsGroup\":${CLOUD_CONTROLLER_MANAGER_RUNASGROUP},@g" "${src_file}"
     sed -i -e "s@{{supplementalGroups}}@\"supplementalGroups\": [ ${KUBE_PKI_READERS_GROUP} ],@g" "${src_file}"
   else
     sed -i -e "s@{{runAsUser}}@@g" "${src_file}"
@@ -2752,6 +2850,11 @@ EOF
     setup-addon-manifests "addons" "konnectivity-agent"
     setup-konnectivity-agent-manifest
   fi
+
+  if [[ "${KUBE_ENABLE_EXTERNAL_GCP_CLOUD_PROVIDER:-false}" == "true" ]]; then
+    setup-addon-manifests "addons" "cloud-provider-gcp"
+  fi
+
   if [[ "${ENABLE_CLUSTER_DNS:-}" == "true" ]]; then
     # Create a new directory for the DNS addon and prepend a "0" on the name.
     # Prepending "0" to the directory ensures that add-on manager
@@ -3358,6 +3461,7 @@ function main() {
 
   log-start 'GenerateTokens'
   KUBE_CONTROLLER_MANAGER_TOKEN="$(secure_random 32)"
+  CLOUD_CONTROLLER_MANAGER_TOKEN="$(secure_random 32)"
   KUBE_SCHEDULER_TOKEN="$(secure_random 32)"
   KUBE_CLUSTER_AUTOSCALER_TOKEN="$(secure_random 32)"
   if [[ "${ENABLE_L7_LOADBALANCING:-}" == "glbc" ]]; then
@@ -3445,6 +3549,9 @@ function main() {
     log-wrap 'StartKubeApiserver' start-kube-apiserver
     if [[ "${RUN_KONNECTIVITY_PODS:-false}" == "true" ]]; then
       log-wrap 'StartKonnectivityServer' start-konnectivity-server
+    fi
+    if [[ "${KUBE_ENABLE_EXTERNAL_GCP_CLOUD_PROVIDER:-false}" == "true" ]]; then
+      log-wrap 'StartKonnectivityServer' start-cloud-controller-manager
     fi
     log-wrap 'StartKubeControllerManager' start-kube-controller-manager
     log-wrap 'StartKubeScheduler' start-kube-scheduler
