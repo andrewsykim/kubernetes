@@ -2155,6 +2155,7 @@ function start-kube-controller-manager {
 
   if [[ "${KUBE_ENABLE_EXTERNAL_GCP_CLOUD_PROVIDER:-false}" == "true" ]]; then
     params+=("--cloud-provider=external")
+    params+=("--external-cloud-volume-plugin=gce")
   else
     params+=("--cloud-provider=${CLOUD_PROVIDER_FLAG:-gce}")
   fi
@@ -3428,6 +3429,7 @@ function main() {
   readonly KUBEDNS_AUTOSCALER="Deployment/kube-dns"
 
   # Resource requests of master components.
+  CLOUD_CONTROLLER_MANAGER_CPU_REQUEST="${CLOUD_CONTROLLER_MANAGER_CPU_REQUEST:-50m}"
   KUBE_CONTROLLER_MANAGER_CPU_REQUEST="${KUBE_CONTROLLER_MANAGER_CPU_REQUEST:-200m}"
   KUBE_SCHEDULER_CPU_REQUEST="${KUBE_SCHEDULER_CPU_REQUEST:-75m}"
 
