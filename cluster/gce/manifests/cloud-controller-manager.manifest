@@ -23,7 +23,7 @@
 "containers":[
     {
     "name": "cloud-controller-manager",
-    "image": "andrewsykim/gcp-controller-manager:v1",
+    "image": "andrewsykim/cloud-controller-manager:v1",
     "resources": {
       "requests": {
         "cpu": "{{cpurequest}}"
