@@ -731,10 +731,10 @@ function yaml-map-string-string {
 function construct-common-kubelet-flags {
   local flags="${KUBELET_TEST_LOG_LEVEL:-"--v=2"} ${KUBELET_TEST_ARGS:-}"
 
-  if [[ -n "${KUBE_ENABLE_EXTERNAL_GCP_CLOUD_PROVIDER:-}" ]]; then
-    flags+=" --cloud-provider=${CLOUD_PROVIDER_FLAG:-gce}"
+  if [[ "${KUBE_ENABLE_EXTERNAL_GCP_CLOUD_PROVIDER:-false}" == "true" ]]; then
+    params+=" --cloud-provider=external"
   else
-    flags+=" --cloud-provider=external"
+    params+=" --cloud-provider=${CLOUD_PROVIDER_FLAG:-gce}"
   fi
 
   # TODO(mtaufen): ROTATE_CERTIFICATES seems unused; delete it?
