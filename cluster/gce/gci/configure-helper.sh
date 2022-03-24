@@ -2262,7 +2262,8 @@ function start-cloud-controller-manager {
   # Calculate variables and assemble the command line.
   local params="${CONTROLLER_MANAGER_TEST_LOG_LEVEL:-"--v=4"} ${CONTROLLER_MANAGER_TEST_ARGS:-} ${CLOUD_CONFIG_OPT}"
   params+=" --port=10253"
-  params+=" --use-service-account-credentials"
+  # TODO: add this back
+  # params+=" --use-service-account-credentials"
   params+=" --cloud-provider=gce"
   params+=" --kubeconfig=/etc/srv/kubernetes/cloud-controller-manager/kubeconfig"
   if [[ -n "${INSTANCE_PREFIX:-}" ]]; then
