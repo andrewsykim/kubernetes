@@ -17,6 +17,7 @@ limitations under the License.
 package network
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -2306,6 +2307,115 @@ var _ = common.SIGDescribe("Services", func() {
 			_, err := framework.RunHostCmd(pausePod3.Namespace, pausePod3.Name, cmd)
 			framework.ExpectError(err, "expected error when trying to connect to cluster IP")
 		}
+	})
+
+	ginkgo.It("should fail health check node port if there are only terminating endpoints [Feature:ProxyTerminatingEndpoints]", func() {
+		// windows kube-proxy does not support this feature yet
+		e2eskipper.SkipIfNodeOSDistroIs("windows")
+
+		// This behavior is not supported if Kube-proxy is in "userspace" mode.
+		// So we check the kube-proxy mode and skip this test if that's the case.
+		if proxyMode, err := proxyMode(f); err == nil {
+			if proxyMode == "userspace" {
+				e2eskipper.Skipf("The test doesn't work with kube-proxy in userspace mode")
+			}
+		} else {
+			framework.Logf("Couldn't detect KubeProxy mode - test failure may be expected: %v", err)
+		}
+
+		nodes, err := e2enode.GetBoundedReadySchedulableNodes(cs, 2)
+		framework.ExpectNoError(err)
+		nodeCounts := len(nodes.Items)
+		if nodeCounts < 2 {
+			e2eskipper.Skipf("The test requires at least two ready nodes on %s, but found %v", framework.TestContext.Provider, nodeCounts)
+		}
+		node0 := nodes.Items[0]
+
+		serviceName := "svc-proxy-terminating"
+		ns := f.Namespace.Name
+		servicePort := 80
+
+		ginkgo.By("creating a TCP service " + serviceName + " where all pods are terminating" + ns)
+		jig := e2eservice.NewTestJig(cs, ns, serviceName)
+		svc, err := jig.CreateTCPService(func(svc *v1.Service) {
+			svc.Spec.Ports = []v1.ServicePort{
+				{Port: 80, Name: "http", Protocol: v1.ProtocolTCP, TargetPort: intstr.FromInt(80)},
+			}
+			svc.Spec.Type = v1.ServiceTypeLoadBalancer
+			svc.Spec.ExternalTrafficPolicy = v1.ServiceExternalTrafficPolicyTypeLocal
+		})
+		framework.ExpectNoError(err)
+
+		ginkgo.By("Creating 1 webserver pod to be part of the TCP service")
+		webserverPod0 := e2epod.NewAgnhostPod(ns, "echo-hostname-0", nil, nil, nil, "netexec", "--http-port", strconv.Itoa(servicePort), "--delay-shutdown", "600")
+		webserverPod0.Labels = jig.Labels
+		webserverPod0.Spec.TerminationGracePeriodSeconds = utilpointer.Int64(600)
+		e2epod.SetNodeSelection(&webserverPod0.Spec, e2epod.NodeSelection{Name: node0.Name})
+
+		_, err = cs.CoreV1().Pods(ns).Create(context.TODO(), webserverPod0, metav1.CreateOptions{})
+		framework.ExpectNoError(err)
+		framework.ExpectNoError(e2epod.WaitTimeoutForPodReadyInNamespace(f.ClientSet, webserverPod0.Name, f.Namespace.Name, framework.PodStartTimeout))
+		validateEndpointsPortsOrFail(cs, ns, serviceName, portsByPodName{webserverPod0.Name: {servicePort}})
+
+		pausePod0 := e2epod.NewAgnhostPod(ns, "pause-pod-0", nil, nil, nil)
+		e2epod.SetNodeSelection(&pausePod0.Spec, e2epod.NodeSelection{Name: node0.Name})
+
+		pausePod0, err = cs.CoreV1().Pods(ns).Create(context.TODO(), pausePod0, metav1.CreateOptions{})
+		framework.ExpectNoError(err)
+		framework.ExpectNoError(e2epod.WaitTimeoutForPodReadyInNamespace(f.ClientSet, pausePod0.Name, f.Namespace.Name, framework.PodStartTimeout))
+
+		// validate that the health check node port from kube-proxy returns 200 when there are ready endpoints
+		nodeIPs := e2enode.GetAddresses(&node0, v1.NodeInternalIP)
+		healthCheckNodePortAddr := net.JoinHostPort(nodeIPs[0], strconv.Itoa(int(svc.Spec.HealthCheckNodePort)))
+		err = wait.PollImmediate(time.Second, time.Minute, func() (bool, error) {
+			cmd := fmt.Sprintf(`curl -q -s --connect-timeout 5 http://%s/healthz`, healthCheckNodePortAddr)
+			out, err := framework.RunHostCmd(pausePod0.Namespace, pausePod0.Name, cmd)
+			if err != nil {
+				return false, err
+			}
+
+			sanitizedJson := &bytes.Buffer{}
+			if err := json.Compact(sanitizedJson, []byte(out)); err != nil {
+				return false, err
+			}
+
+			expectedOut := fmt.Sprintf(`{"service":{"namespace":%q,"name":%q},"localEndpoints":%d}`, svc.Namespace, svc.Name, 1)
+			if sanitizedJson.String() != expectedOut {
+				return false, nil
+			}
+
+			return true, nil
+		})
+		framework.ExpectNoError(err)
+
+		// webserver should continue to serve traffic through the Service after deletion, even though the health check node port should return 503
+		ginkgo.By("Terminating the webserver pod")
+		err = cs.CoreV1().Pods(ns).Delete(context.TODO(), webserverPod0.Name, metav1.DeleteOptions{})
+		framework.ExpectNoError(err)
+
+		err = wait.PollImmediate(time.Second, time.Minute, func() (bool, error) {
+			cmd := fmt.Sprintf(`curl -q -s --connect-timeout 5 http://%s/healthz`, healthCheckNodePortAddr)
+			out, err := framework.RunHostCmd(pausePod0.Namespace, pausePod0.Name, cmd)
+			if err != nil {
+				return false, err
+			}
+
+			sanitizedJson := &bytes.Buffer{}
+			if err := json.Compact(sanitizedJson, []byte(out)); err != nil {
+				return false, err
+			}
+
+			expectedOut := fmt.Sprintf(`{"service":{"namespace":%q,"name":%q},"localEndpoints":%d}`, svc.Namespace, svc.Name, 0)
+			if sanitizedJson.String() != expectedOut {
+				return false, nil
+			}
+			return true, nil
+		})
+		framework.ExpectNoError(err)
+
+		// also verify that while health check node port indicates 0 endpoints and returns 503, the endpoint still serves traffic.
+		nodePortAddress := net.JoinHostPort(nodeIPs[0], strconv.Itoa(int(svc.Spec.Ports[0].NodePort)))
+		execHostnameTest(*pausePod0, nodePortAddress, webserverPod0.Name)
 	})
 
 	ginkgo.It("should fallback to terminating endpoints when there are no ready endpoints with internalTrafficPolicy=Cluster [Feature:ProxyTerminatingEndpoints]", func() {
