@@ -352,7 +352,7 @@ func TestCategorizeEndpoints(t *testing.T) {
 			&BaseEndpointInfo{Endpoint: "10.0.0.0:80", Ready: false, Serving: true, Terminating: true, IsLocal: true},
 			&BaseEndpointInfo{Endpoint: "10.0.0.1:80", Ready: false, Serving: true, Terminating: true, IsLocal: true},
 		},
-		clusterEndpoints: sets.NewString(),
+		clusterEndpoints: sets.NewString("10.0.0.0:80", "10.0.0.1:80"),
 		localEndpoints:   nil,
 	}, {
 		name:        "iTP: Local, eTP: Cluster, some endpoints local",
@@ -412,9 +412,9 @@ func TestCategorizeEndpoints(t *testing.T) {
 			&BaseEndpointInfo{Endpoint: "10.0.0.0:80", Ready: false, Serving: true, Terminating: true, IsLocal: false},
 			&BaseEndpointInfo{Endpoint: "10.0.0.1:80", Ready: false, Serving: true, Terminating: true, IsLocal: false},
 		},
-		clusterEndpoints:    sets.NewString(),
+		clusterEndpoints:    sets.NewString("10.0.0.0:80", "10.0.0.1:80"),
 		localEndpoints:      sets.NewString(),
-		allEndpoints:        sets.NewString(),
+		allEndpoints:        sets.NewString("10.0.0.0:80", "10.0.0.1:80"),
 		onlyRemoteEndpoints: true,
 	}, {
 		name:        "iTP: Cluster, eTP: Local, PTE disabled, with terminating endpoints",

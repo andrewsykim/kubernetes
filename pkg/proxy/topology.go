@@ -52,6 +52,17 @@ func CategorizeEndpoints(endpoints []Endpoint, svcInfo ServicePort, nodeLabels m
 			return true
 		})
 
+		// if there are 0 cluster-wide endpoints, we can try to fallback to any terminating endpoints that are ready.
+		if len(clusterEndpoints) == 0 && utilfeature.DefaultFeatureGate.Enabled(features.ProxyTerminatingEndpoints) {
+			clusterEndpoints = filterEndpoints(endpoints, func(ep Endpoint) bool {
+				if ep.IsServing() && ep.IsTerminating() {
+					return true
+				}
+
+				return false
+			})
+		}
+
 		// If there are any Ready endpoints anywhere in the cluster, we are
 		// guaranteed to get one in clusterEndpoints.
 		if len(clusterEndpoints) > 0 {
