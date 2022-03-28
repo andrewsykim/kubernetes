@@ -5244,9 +5244,9 @@ COMMIT
 	}
 }
 
-// Test_EndpointSliceWithTerminatingEndpoints tests that when there are local ready and ready + terminating
+// Test_EndpointSliceWithTerminatingEndpointsTrafficPolicyLocal tests that when there are local ready and ready + terminating
 // endpoints, only the ready endpoints are used.
-func Test_EndpointSliceWithTerminatingEndpoints(t *testing.T) {
+func Test_EndpointSliceWithTerminatingEndpointsTrafficPolicyLocal(t *testing.T) {
 	tcpProtocol := v1.ProtocolTCP
 	timeout := v1.DefaultClientIPServiceAffinitySeconds
 	service := &v1.Service{
@@ -5864,6 +5864,7 @@ COMMIT
 :KUBE-SERVICES - [0:0]
 :KUBE-NODEPORTS - [0:0]
 :KUBE-POSTROUTING - [0:0]
+:KUBE-SEP-EQCHZ7S2PJ72OHAY - [0:0]
 :KUBE-MARK-MASQ - [0:0]
 :KUBE-SVC-AQI2S6QIMU7PVVRP - [0:0]
 :KUBE-SVL-AQI2S6QIMU7PVVRP - [0:0]
@@ -5872,8 +5873,12 @@ COMMIT
 -A KUBE-POSTROUTING -m mark ! --mark 0x4000/0x4000 -j RETURN
 -A KUBE-POSTROUTING -j MARK --xor-mark 0x4000
 -A KUBE-POSTROUTING -m comment --comment "kubernetes service traffic requiring SNAT" -j MASQUERADE
+-A KUBE-SEP-EQCHZ7S2PJ72OHAY -m comment --comment ns1/svc1 -s 10.0.1.5 -j KUBE-MARK-MASQ
+-A KUBE-SEP-EQCHZ7S2PJ72OHAY -m comment --comment ns1/svc1 -m recent --name KUBE-SEP-EQCHZ7S2PJ72OHAY --set -m tcp -p tcp -j DNAT --to-destination 10.0.1.5:80
 -A KUBE-MARK-MASQ -j MARK --or-mark 0x4000
 -A KUBE-SVC-AQI2S6QIMU7PVVRP -m comment --comment "ns1/svc1 cluster IP" -m tcp -p tcp -d 172.30.1.1 --dport 80 ! -s 10.0.0.0/8 -j KUBE-MARK-MASQ
+-A KUBE-SVC-AQI2S6QIMU7PVVRP -m comment --comment ns1/svc1 -m recent --name KUBE-SEP-EQCHZ7S2PJ72OHAY --rcheck --seconds 10800 --reap -j KUBE-SEP-EQCHZ7S2PJ72OHAY
+-A KUBE-SVC-AQI2S6QIMU7PVVRP -m comment --comment ns1/svc1 -j KUBE-SEP-EQCHZ7S2PJ72OHAY
 -A KUBE-SERVICES -m comment --comment "ns1/svc1 cluster IP" -m tcp -p tcp -d 172.30.1.1 --dport 80 -j KUBE-SVC-AQI2S6QIMU7PVVRP
 -A KUBE-SERVICES -m comment --comment "ns1/svc1 loadbalancer IP" -m tcp -p tcp -d 1.2.3.4 --dport 80 -j KUBE-FW-AQI2S6QIMU7PVVRP
 -A KUBE-FW-AQI2S6QIMU7PVVRP -m comment --comment "ns1/svc1 loadbalancer IP" -j KUBE-XLB-AQI2S6QIMU7PVVRP
@@ -5888,11 +5893,11 @@ COMMIT
 `,
 			flowTests: []packetFlowTest{
 				{
-					name:     "pod to clusterIP, no internally-usable endpoints",
+					name:     "pod to clusterIP, terminating internally-usable endpoints",
 					sourceIP: "10.0.0.2",
 					destIP:   "172.30.1.1",
 					destPort: 80,
-					output:   "",
+					output:   "10.0.1.5:80",
 				},
 				{
 					name:     "external to LB, no locally-usable endpoints",
