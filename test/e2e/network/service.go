@@ -51,6 +51,7 @@ import (
 
 	cloudprovider "k8s.io/cloud-provider"
 	netutils "k8s.io/utils/net"
+	utilpointer "k8s.io/utils/pointer"
 
 	"k8s.io/kubernetes/test/e2e/framework"
 	e2edeployment "k8s.io/kubernetes/test/e2e/framework/deployment"
@@ -2304,6 +2305,170 @@ var _ = common.SIGDescribe("Services", func() {
 			cmd := fmt.Sprintf(`curl -q -s --connect-timeout 5 %s/hostname`, serviceAddress)
 			_, err := framework.RunHostCmd(pausePod3.Namespace, pausePod3.Name, cmd)
 			framework.ExpectError(err, "expected error when trying to connect to cluster IP")
+		}
+	})
+
+	ginkgo.It("should fallback to terminating endpoints when there are no ready endpoints with internalTrafficPolicy=Cluster [Feature:ProxyTerminatingEndpoints]", func() {
+		// windows kube-proxy does not support this feature yet
+		e2eskipper.SkipIfNodeOSDistroIs("windows")
+
+		// This behavior is not supported if Kube-proxy is in "userspace" mode.
+		// So we check the kube-proxy mode and skip this test if that's the case.
+		if proxyMode, err := proxyMode(f); err == nil {
+			if proxyMode == "userspace" {
+				e2eskipper.Skipf("The test doesn't work with kube-proxy in userspace mode")
+			}
+		} else {
+			framework.Logf("Couldn't detect KubeProxy mode - test failure may be expected: %v", err)
+		}
+
+		nodes, err := e2enode.GetBoundedReadySchedulableNodes(cs, 2)
+		framework.ExpectNoError(err)
+		nodeCounts := len(nodes.Items)
+		if nodeCounts < 2 {
+			e2eskipper.Skipf("The test requires at least two ready nodes on %s, but found %v", framework.TestContext.Provider, nodeCounts)
+		}
+		node0 := nodes.Items[0]
+		node1 := nodes.Items[1]
+
+		serviceName := "svc-proxy-terminating"
+		ns := f.Namespace.Name
+		servicePort := 80
+
+		ginkgo.By("creating a TCP service " + serviceName + " where all pods are terminating" + ns)
+		jig := e2eservice.NewTestJig(cs, ns, serviceName)
+		svc, err := jig.CreateTCPService(func(svc *v1.Service) {
+			svc.Spec.Ports = []v1.ServicePort{
+				{Port: 80, Name: "http", Protocol: v1.ProtocolTCP, TargetPort: intstr.FromInt(80)},
+			}
+		})
+		framework.ExpectNoError(err)
+
+		ginkgo.By("Creating 1 webserver pod to be part of the TCP service")
+		webserverPod0 := e2epod.NewAgnhostPod(ns, "echo-hostname-0", nil, nil, nil, "netexec", "--http-port", strconv.Itoa(servicePort), "--delay-shutdown", "600")
+		webserverPod0.Labels = jig.Labels
+		webserverPod0.Spec.TerminationGracePeriodSeconds = utilpointer.Int64(600)
+		e2epod.SetNodeSelection(&webserverPod0.Spec, e2epod.NodeSelection{Name: node0.Name})
+
+		_, err = cs.CoreV1().Pods(ns).Create(context.TODO(), webserverPod0, metav1.CreateOptions{})
+		framework.ExpectNoError(err)
+		framework.ExpectNoError(e2epod.WaitTimeoutForPodReadyInNamespace(f.ClientSet, webserverPod0.Name, f.Namespace.Name, framework.PodStartTimeout))
+		validateEndpointsPortsOrFail(cs, ns, serviceName, portsByPodName{webserverPod0.Name: {servicePort}})
+
+		ginkgo.By("Creating 2 pause pods that will try to connect to the webservers")
+		pausePod0 := e2epod.NewAgnhostPod(ns, "pause-pod-0", nil, nil, nil)
+		e2epod.SetNodeSelection(&pausePod0.Spec, e2epod.NodeSelection{Name: node0.Name})
+
+		pausePod0, err = cs.CoreV1().Pods(ns).Create(context.TODO(), pausePod0, metav1.CreateOptions{})
+		framework.ExpectNoError(err)
+		framework.ExpectNoError(e2epod.WaitTimeoutForPodReadyInNamespace(f.ClientSet, pausePod0.Name, f.Namespace.Name, framework.PodStartTimeout))
+
+		pausePod1 := e2epod.NewAgnhostPod(ns, "pause-pod-1", nil, nil, nil)
+		e2epod.SetNodeSelection(&pausePod1.Spec, e2epod.NodeSelection{Name: node1.Name})
+
+		pausePod1, err = cs.CoreV1().Pods(ns).Create(context.TODO(), pausePod1, metav1.CreateOptions{})
+		framework.ExpectNoError(err)
+		framework.ExpectNoError(e2epod.WaitTimeoutForPodReadyInNamespace(f.ClientSet, pausePod1.Name, f.Namespace.Name, framework.PodStartTimeout))
+
+		// webserver should continue to serve traffic through the Service after delete since:
+		//  - it has a 600s termination grace period
+		//  - it is the only ready endpoint
+		err = cs.CoreV1().Pods(ns).Delete(context.TODO(), webserverPod0.Name, metav1.DeleteOptions{})
+		framework.ExpectNoError(err)
+
+		// assert 5 times that both the local and remote pod can connect to the Service while all endpoints are terminating
+		serviceAddress := net.JoinHostPort(svc.Spec.ClusterIP, strconv.Itoa(servicePort))
+		for i := 0; i < 5; i++ {
+			// both first and second pause pod can connect to the terminating webserver since iTP=Cluster
+			execHostnameTest(*pausePod0, serviceAddress, webserverPod0.Name)
+			execHostnameTest(*pausePod1, serviceAddress, webserverPod0.Name)
+
+			time.Sleep(5 * time.Second)
+		}
+	})
+
+	ginkgo.It("should fallback to local terminating endpoints when there are no ready endpoints with internalTrafficPolicy=Local [Feature:ProxyTerminatingEndpoints]", func() {
+		// windows kube-proxy does not support this feature yet
+		e2eskipper.SkipIfNodeOSDistroIs("windows")
+
+		// This behavior is not supported if Kube-proxy is in "userspace" mode.
+		// So we check the kube-proxy mode and skip this test if that's the case.
+		if proxyMode, err := proxyMode(f); err == nil {
+			if proxyMode == "userspace" {
+				e2eskipper.Skipf("The test doesn't work with kube-proxy in userspace mode")
+			}
+		} else {
+			framework.Logf("Couldn't detect KubeProxy mode - test failure may be expected: %v", err)
+		}
+
+		nodes, err := e2enode.GetBoundedReadySchedulableNodes(cs, 2)
+		framework.ExpectNoError(err)
+		nodeCounts := len(nodes.Items)
+		if nodeCounts < 2 {
+			e2eskipper.Skipf("The test requires at least two ready nodes on %s, but found %v", framework.TestContext.Provider, nodeCounts)
+		}
+		node0 := nodes.Items[0]
+		node1 := nodes.Items[1]
+
+		serviceName := "svc-proxy-terminating"
+		ns := f.Namespace.Name
+		servicePort := 80
+
+		ginkgo.By("creating a TCP service " + serviceName + " where all pods are terminating" + ns)
+		jig := e2eservice.NewTestJig(cs, ns, serviceName)
+		local := v1.ServiceInternalTrafficPolicyLocal
+		svc, err := jig.CreateTCPService(func(svc *v1.Service) {
+			svc.Spec.Ports = []v1.ServicePort{
+				{Port: 80, Name: "http", Protocol: v1.ProtocolTCP, TargetPort: intstr.FromInt(80)},
+			}
+			svc.Spec.InternalTrafficPolicy = &local
+		})
+		framework.ExpectNoError(err)
+
+		ginkgo.By("Creating 1 webserver pod to be part of the TCP service")
+		webserverPod0 := e2epod.NewAgnhostPod(ns, "echo-hostname-0", nil, nil, nil, "netexec", "--http-port", strconv.Itoa(servicePort), "--delay-shutdown", "600")
+		webserverPod0.Labels = jig.Labels
+		webserverPod0.Spec.TerminationGracePeriodSeconds = utilpointer.Int64(600)
+		e2epod.SetNodeSelection(&webserverPod0.Spec, e2epod.NodeSelection{Name: node0.Name})
+
+		_, err = cs.CoreV1().Pods(ns).Create(context.TODO(), webserverPod0, metav1.CreateOptions{})
+		framework.ExpectNoError(err)
+		framework.ExpectNoError(e2epod.WaitTimeoutForPodReadyInNamespace(f.ClientSet, webserverPod0.Name, f.Namespace.Name, framework.PodStartTimeout))
+		validateEndpointsPortsOrFail(cs, ns, serviceName, portsByPodName{webserverPod0.Name: {servicePort}})
+
+		ginkgo.By("Creating 2 pause pods that will try to connect to the webservers")
+		pausePod0 := e2epod.NewAgnhostPod(ns, "pause-pod-0", nil, nil, nil)
+		e2epod.SetNodeSelection(&pausePod0.Spec, e2epod.NodeSelection{Name: node0.Name})
+
+		pausePod0, err = cs.CoreV1().Pods(ns).Create(context.TODO(), pausePod0, metav1.CreateOptions{})
+		framework.ExpectNoError(err)
+		framework.ExpectNoError(e2epod.WaitTimeoutForPodReadyInNamespace(f.ClientSet, pausePod0.Name, f.Namespace.Name, framework.PodStartTimeout))
+
+		pausePod1 := e2epod.NewAgnhostPod(ns, "pause-pod-1", nil, nil, nil)
+		e2epod.SetNodeSelection(&pausePod1.Spec, e2epod.NodeSelection{Name: node1.Name})
+
+		pausePod1, err = cs.CoreV1().Pods(ns).Create(context.TODO(), pausePod1, metav1.CreateOptions{})
+		framework.ExpectNoError(err)
+		framework.ExpectNoError(e2epod.WaitTimeoutForPodReadyInNamespace(f.ClientSet, pausePod1.Name, f.Namespace.Name, framework.PodStartTimeout))
+
+		// webserver should continue to serve traffic through the Service after delete since:
+		//  - it has a 600s termination grace period
+		//  - it is the only ready endpoint
+		err = cs.CoreV1().Pods(ns).Delete(context.TODO(), webserverPod0.Name, metav1.DeleteOptions{})
+		framework.ExpectNoError(err)
+
+		// assert 5 times that the first pause pod can connect to the Service locally and the second one errors with a timeout
+		serviceAddress := net.JoinHostPort(svc.Spec.ClusterIP, strconv.Itoa(servicePort))
+		for i := 0; i < 5; i++ {
+			// the first pause pod should be on the same node as the webserver, so it can connect to the local pod using clusterIP
+			execHostnameTest(*pausePod0, serviceAddress, webserverPod0.Name)
+
+			// the second pause pod is on a different node, so it should see a connection error every time
+			cmd := fmt.Sprintf(`curl -q -s --connect-timeout 5 %s/hostname`, serviceAddress)
+			_, err := framework.RunHostCmd(pausePod1.Namespace, pausePod1.Name, cmd)
+			framework.ExpectError(err, "expected error when trying to connect to cluster IP")
+
+			time.Sleep(5 * time.Second)
 		}
 	})
 
