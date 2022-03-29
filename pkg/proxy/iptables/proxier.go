@@ -38,9 +38,11 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
+	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	"k8s.io/client-go/tools/events"
 	utilsysctl "k8s.io/component-helpers/node/util/sysctl"
 	"k8s.io/klog/v2"
+	"k8s.io/kubernetes/pkg/features"
 	"k8s.io/kubernetes/pkg/proxy"
 	"k8s.io/kubernetes/pkg/proxy/healthcheck"
 	"k8s.io/kubernetes/pkg/proxy/metaproxier"
@@ -989,6 +991,11 @@ func (proxier *Proxier) syncProxyRules() {
 		}
 	}
 
+	// These two variables are used to publish the sync_proxy_rules_no_endpoints_total
+	// metric.
+	serviceNoLocalEndpointsTotalInternal := 0
+	serviceNoLocalEndpointsTotalExternal := 0
+
 	// Build rules for each service.
 	for svcName, svc := range proxier.serviceMap {
 		svcInfo, ok := svc.(*serviceInfo)
@@ -1355,16 +1362,24 @@ func (proxier *Proxier) syncProxyRules() {
 			if len(localEndpoints) != 0 {
 				// Write rules jumping from policyLocalChain to localEndpointChains
 				proxier.writeServiceToEndpointRules(svcNameString, svcInfo, policyLocalChain, localEndpoints, args)
-			} else if hasEndpoints {
-				// Blackhole all traffic since there are no local endpoints
-				args = append(args[:0],
-					"-A", string(policyLocalChain),
-					"-m", "comment", "--comment",
-					fmt.Sprintf(`"%s has no local endpoints"`, svcNameString),
-					"-j",
-					string(KubeMarkDropChain),
-				)
-				proxier.natRules.Write(args)
+			} else {
+				if svcInfo.NodeLocalInternal() && utilfeature.DefaultFeatureGate.Enabled(features.ServiceInternalTrafficPolicy) {
+					serviceNoLocalEndpointsTotalInternal++
+				}
+				if svcInfo.NodeLocalExternal() {
+					serviceNoLocalEndpointsTotalExternal++
+				}
+				if hasEndpoints {
+					// Blackhole all traffic since there are no local endpoints
+					args = append(args[:0],
+						"-A", string(policyLocalChain),
+						"-m", "comment", "--comment",
+						fmt.Sprintf(`"%s has no local endpoints"`, svcNameString),
+						"-j",
+						string(KubeMarkDropChain),
+					)
+					proxier.natRules.Write(args)
+				}
 			}
 		}
 	}
@@ -1489,6 +1504,8 @@ func (proxier *Proxier) syncProxyRules() {
 		}
 	}
 
+	metrics.SyncProxyRulesNoLocalEndpointsTotal.WithLabelValues("internal").Set(float64(serviceNoLocalEndpointsTotalInternal))
+	metrics.SyncProxyRulesNoLocalEndpointsTotal.WithLabelValues("external").Set(float64(serviceNoLocalEndpointsTotalExternal))
 	if proxier.healthzServer != nil {
 		proxier.healthzServer.Updated()
 	}
