@@ -154,19 +154,31 @@ func (a *Webhook) ShouldCallHook(h webhook.WebhookAccessor, attr admission.Attri
 	}
 
 	var invocation *WebhookInvocation
-	for _, r := range h.GetRules() {
+	inExcludeRules := false
+	for _, r := range h.GetExcludeRules() {
 		m := rules.Matcher{Rule: r, Attr: attr}
 		if m.Matches() {
-			invocation = &WebhookInvocation{
-				Webhook:     h,
-				Resource:    attr.GetResource(),
-				Subresource: attr.GetSubresource(),
-				Kind:        attr.GetKind(),
-			}
+			inExcludeRules = true
 			break
 		}
 	}
-	if invocation == nil && h.GetMatchPolicy() != nil && *h.GetMatchPolicy() == v1.Equivalent {
+
+	if !inExcludeRules {
+		for _, r := range h.GetRules() {
+			m := rules.Matcher{Rule: r, Attr: attr}
+			if m.Matches() {
+				invocation = &WebhookInvocation{
+					Webhook:     h,
+					Resource:    attr.GetResource(),
+					Subresource: attr.GetSubresource(),
+					Kind:        attr.GetKind(),
+				}
+				break
+			}
+		}
+	}
+
+	if !inExcludeRules && invocation == nil && h.GetMatchPolicy() != nil && *h.GetMatchPolicy() == v1.Equivalent {
 		attrWithOverride := &attrWithResourceOverride{Attributes: attr}
 		equivalents := o.GetEquivalentResourceMapper().EquivalentResourcesFor(attr.GetResource(), attr.GetSubresource())
 		// honor earlier rules first

@@ -19,7 +19,7 @@ package webhook
 import (
 	"sync"
 
-	"k8s.io/api/admissionregistration/v1"
+	v1 "k8s.io/api/admissionregistration/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apiserver/pkg/admission/plugin/webhook/predicates/namespace"
@@ -52,6 +52,8 @@ type WebhookAccessor interface {
 	GetClientConfig() v1.WebhookClientConfig
 	// GetRules gets the webhook Rules field.
 	GetRules() []v1.RuleWithOperations
+	// GetExcludeRules gets the webhook ExcludeRules field.
+	GetExcludeRules() []v1.RuleWithOperations
 	// GetFailurePolicy gets the webhook FailurePolicy field.
 	GetFailurePolicy() *v1.FailurePolicyType
 	// GetMatchPolicy gets the webhook MatchPolicy field.
@@ -135,6 +137,10 @@ func (m *mutatingWebhookAccessor) GetClientConfig() v1.WebhookClientConfig {
 
 func (m *mutatingWebhookAccessor) GetRules() []v1.RuleWithOperations {
 	return m.Rules
+}
+
+func (m *mutatingWebhookAccessor) GetExcludeRules() []v1.RuleWithOperations {
+	return m.ExcludeRules
 }
 
 func (m *mutatingWebhookAccessor) GetFailurePolicy() *v1.FailurePolicyType {
@@ -235,6 +241,10 @@ func (v *validatingWebhookAccessor) GetClientConfig() v1.WebhookClientConfig {
 
 func (v *validatingWebhookAccessor) GetRules() []v1.RuleWithOperations {
 	return v.Rules
+}
+
+func (v *validatingWebhookAccessor) GetExcludeRules() []v1.RuleWithOperations {
+	return v.ExcludeRules
 }
 
 func (v *validatingWebhookAccessor) GetFailurePolicy() *v1.FailurePolicyType {

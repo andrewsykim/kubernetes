@@ -461,6 +461,10 @@ type ValidatingWebhook struct {
 	// The webhook cares about an operation if it matches _any_ Rule.
 	Rules []RuleWithOperations
 
+	// ExcludeResourceRules describes what operations on what resources/subresources the webhook should not care about.
+	// The exclude rules take precedence over include rules (if a resource matches both, it is excluded)
+	ExcludeRules []RuleWithOperations
+
 	// FailurePolicy defines how unrecognized errors from the admission endpoint are handled -
 	// allowed values are Ignore or Fail. Defaults to Ignore.
 	// +optional
@@ -584,6 +588,10 @@ type MutatingWebhook struct {
 	// Rules describes what operations on what resources/subresources the webhook cares about.
 	// The webhook cares about an operation if it matches _any_ Rule.
 	Rules []RuleWithOperations
+
+	// ExcludeResourceRules describes what operations on what resources/subresources the webhook should not care about.
+	// The exclude rules take precedence over include rules (if a resource matches both, it is excluded)
+	ExcludeRules []RuleWithOperations
 
 	// FailurePolicy defines how unrecognized errors from the admission endpoint are handled -
 	// allowed values are Ignore or Fail. Defaults to Ignore.
