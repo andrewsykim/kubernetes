@@ -21,7 +21,7 @@ import (
 	"strings"
 	"testing"
 
-	"k8s.io/api/admissionregistration/v1"
+	v1 "k8s.io/api/admissionregistration/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -110,6 +110,22 @@ func TestShouldCallHook(t *testing.T) {
 			expectCallKind:        schema.GroupVersionKind{"apps", "v1", "Deployment"},
 			expectCallResource:    schema.GroupVersionResource{"apps", "v1", "deployments"},
 			expectCallSubresource: "",
+		},
+		{
+			name: "wildcard rule, with exclude rule",
+			webhook: &v1.ValidatingWebhook{
+				NamespaceSelector: &metav1.LabelSelector{},
+				ObjectSelector:    &metav1.LabelSelector{},
+				Rules: []v1.RuleWithOperations{{
+					Operations: []v1.OperationType{"*"},
+					Rule:       v1.Rule{APIGroups: []string{"*"}, APIVersions: []string{"*"}, Resources: []string{"*"}, Scope: &allScopes},
+				}},
+				ExcludeRules: []v1.RuleWithOperations{{
+					Operations: []v1.OperationType{"*"},
+					Rule:       v1.Rule{APIGroups: []string{"apps"}, APIVersions: []string{"v1"}, Resources: []string{"deployments"}, Scope: &allScopes},
+				}}},
+			attrs:      admission.NewAttributesRecord(nil, nil, schema.GroupVersionKind{"apps", "v1", "Deployment"}, "ns", "name", schema.GroupVersionResource{"apps", "v1", "deployments"}, "", admission.Create, &metav1.CreateOptions{}, false, nil),
+			expectCall: false,
 		},
 		{
 			name: "specific rules, prefer exact match",
