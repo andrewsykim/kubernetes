@@ -43,6 +43,16 @@ webhooks:
       path: pathValue
       port: 4
     url: urlValue
+  excludeRules:
+  - apiGroups:
+    - apiGroupsValue
+    apiVersions:
+    - apiVersionsValue
+    operations:
+    - operationsValue
+    resources:
+    - resourcesValue
+    scope: scopeValue
   failurePolicy: failurePolicyValue
   matchPolicy: matchPolicyValue
   name: nameValue

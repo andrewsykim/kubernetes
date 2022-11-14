@@ -29,6 +29,7 @@ type MutatingWebhookApplyConfiguration struct {
 	Name                    *string                                         `json:"name,omitempty"`
 	ClientConfig            *WebhookClientConfigApplyConfiguration          `json:"clientConfig,omitempty"`
 	Rules                   []RuleWithOperationsApplyConfiguration          `json:"rules,omitempty"`
+	ExcludeRules            []RuleWithOperationsApplyConfiguration          `json:"excludeRules,omitempty"`
 	FailurePolicy           *admissionregistrationv1.FailurePolicyType      `json:"failurePolicy,omitempty"`
 	MatchPolicy             *admissionregistrationv1.MatchPolicyType        `json:"matchPolicy,omitempty"`
 	NamespaceSelector       *metav1.LabelSelectorApplyConfiguration         `json:"namespaceSelector,omitempty"`
@@ -70,6 +71,19 @@ func (b *MutatingWebhookApplyConfiguration) WithRules(values ...*RuleWithOperati
 			panic("nil value passed to WithRules")
 		}
 		b.Rules = append(b.Rules, *values[i])
+	}
+	return b
+}
+
+// WithExcludeRules adds the given value to the ExcludeRules field in the declarative configuration
+// and returns the receiver, so that objects can be build by chaining "With" function invocations.
+// If called multiple times, values provided by each call will be appended to the ExcludeRules field.
+func (b *MutatingWebhookApplyConfiguration) WithExcludeRules(values ...*RuleWithOperationsApplyConfiguration) *MutatingWebhookApplyConfiguration {
+	for i := range values {
+		if values[i] == nil {
+			panic("nil value passed to WithExcludeRules")
+		}
+		b.ExcludeRules = append(b.ExcludeRules, *values[i])
 	}
 	return b
 }

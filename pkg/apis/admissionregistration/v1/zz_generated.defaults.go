@@ -56,6 +56,10 @@ func SetObjectDefaults_MutatingWebhookConfiguration(in *v1.MutatingWebhookConfig
 			b := &a.Rules[j]
 			SetDefaults_Rule(&b.Rule)
 		}
+		for j := range a.ExcludeRules {
+			b := &a.ExcludeRules[j]
+			SetDefaults_Rule(&b.Rule)
+		}
 	}
 }
 
@@ -75,6 +79,10 @@ func SetObjectDefaults_ValidatingWebhookConfiguration(in *v1.ValidatingWebhookCo
 		}
 		for j := range a.Rules {
 			b := &a.Rules[j]
+			SetDefaults_Rule(&b.Rule)
+		}
+		for j := range a.ExcludeRules {
+			b := &a.ExcludeRules[j]
 			SetDefaults_Rule(&b.Rule)
 		}
 	}

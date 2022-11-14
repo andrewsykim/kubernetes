@@ -52,6 +52,12 @@ var schemaYAML = typed.YAMLObject(`types:
       type:
         namedType: io.k8s.api.admissionregistration.v1.WebhookClientConfig
       default: {}
+    - name: excludeRules
+      type:
+        list:
+          elementType:
+            namedType: io.k8s.api.admissionregistration.v1.RuleWithOperations
+          elementRelationship: atomic
     - name: failurePolicy
       type:
         scalar: string
@@ -164,6 +170,12 @@ var schemaYAML = typed.YAMLObject(`types:
       type:
         namedType: io.k8s.api.admissionregistration.v1.WebhookClientConfig
       default: {}
+    - name: excludeRules
+      type:
+        list:
+          elementType:
+            namedType: io.k8s.api.admissionregistration.v1.RuleWithOperations
+          elementRelationship: atomic
     - name: failurePolicy
       type:
         scalar: string
@@ -397,6 +409,12 @@ var schemaYAML = typed.YAMLObject(`types:
       type:
         namedType: io.k8s.api.admissionregistration.v1beta1.WebhookClientConfig
       default: {}
+    - name: excludeRules
+      type:
+        list:
+          elementType:
+            namedType: io.k8s.api.admissionregistration.v1.RuleWithOperations
+          elementRelationship: atomic
     - name: failurePolicy
       type:
         scalar: string
@@ -479,6 +497,12 @@ var schemaYAML = typed.YAMLObject(`types:
       type:
         namedType: io.k8s.api.admissionregistration.v1beta1.WebhookClientConfig
       default: {}
+    - name: excludeRules
+      type:
+        list:
+          elementType:
+            namedType: io.k8s.api.admissionregistration.v1.RuleWithOperations
+          elementRelationship: atomic
     - name: failurePolicy
       type:
         scalar: string

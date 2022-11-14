@@ -49,6 +49,12 @@ message MutatingWebhook {
   // on admission requests for ValidatingWebhookConfiguration and MutatingWebhookConfiguration objects.
   repeated RuleWithOperations rules = 3;
 
+  // ExcludeResourceRules describes what operations on what resources/subresources the webhook should not care about.
+  // The exclude rules take precedence over include rules (if a resource matches both, it is excluded)
+  // +listType=atomic
+  // +optional
+  repeated RuleWithOperations excludeRules = 12;
+
   // FailurePolicy defines how unrecognized errors from the admission endpoint are handled -
   // allowed values are Ignore or Fail. Defaults to Fail.
   // +optional
@@ -302,6 +308,12 @@ message ValidatingWebhook {
   // disabling the plugin, ValidatingAdmissionWebhooks and MutatingAdmissionWebhooks are never called
   // on admission requests for ValidatingWebhookConfiguration and MutatingWebhookConfiguration objects.
   repeated RuleWithOperations rules = 3;
+
+  // ExcludeResourceRules describes what operations on what resources/subresources the webhook should not care about.
+  // The exclude rules take precedence over include rules (if a resource matches both, it is excluded)
+  // +listType=atomic
+  // +optional
+  repeated RuleWithOperations excludeRules = 11;
 
   // FailurePolicy defines how unrecognized errors from the admission endpoint are handled -
   // allowed values are Ignore or Fail. Defaults to Fail.

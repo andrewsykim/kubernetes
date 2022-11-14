@@ -82,6 +82,13 @@ func (in *MutatingWebhook) DeepCopyInto(out *MutatingWebhook) {
 			(*in)[i].DeepCopyInto(&(*out)[i])
 		}
 	}
+	if in.ExcludeRules != nil {
+		in, out := &in.ExcludeRules, &out.ExcludeRules
+		*out = make([]RuleWithOperations, len(*in))
+		for i := range *in {
+			(*in)[i].DeepCopyInto(&(*out)[i])
+		}
+	}
 	if in.FailurePolicy != nil {
 		in, out := &in.FailurePolicy, &out.FailurePolicy
 		*out = new(FailurePolicyType)
@@ -524,6 +531,13 @@ func (in *ValidatingWebhook) DeepCopyInto(out *ValidatingWebhook) {
 	in.ClientConfig.DeepCopyInto(&out.ClientConfig)
 	if in.Rules != nil {
 		in, out := &in.Rules, &out.Rules
+		*out = make([]RuleWithOperations, len(*in))
+		for i := range *in {
+			(*in)[i].DeepCopyInto(&(*out)[i])
+		}
+	}
+	if in.ExcludeRules != nil {
+		in, out := &in.ExcludeRules, &out.ExcludeRules
 		*out = make([]RuleWithOperations, len(*in))
 		for i := range *in {
 			(*in)[i].DeepCopyInto(&(*out)[i])

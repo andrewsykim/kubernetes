@@ -174,6 +174,12 @@ type ValidatingWebhook struct {
 	// on admission requests for ValidatingWebhookConfiguration and MutatingWebhookConfiguration objects.
 	Rules []RuleWithOperations `json:"rules,omitempty" protobuf:"bytes,3,rep,name=rules"`
 
+	// ExcludeResourceRules describes what operations on what resources/subresources the webhook should not care about.
+	// The exclude rules take precedence over include rules (if a resource matches both, it is excluded)
+	// +listType=atomic
+	// +optional
+	ExcludeRules []RuleWithOperations `json:"excludeRules,omitempty" protobuf:"bytes,12,rep,name=excludeRules"`
+
 	// FailurePolicy defines how unrecognized errors from the admission endpoint are handled -
 	// allowed values are Ignore or Fail. Defaults to Ignore.
 	// +optional
@@ -305,6 +311,12 @@ type MutatingWebhook struct {
 	// disabling the plugin, ValidatingAdmissionWebhooks and MutatingAdmissionWebhooks are never called
 	// on admission requests for ValidatingWebhookConfiguration and MutatingWebhookConfiguration objects.
 	Rules []RuleWithOperations `json:"rules,omitempty" protobuf:"bytes,3,rep,name=rules"`
+
+	// ExcludeResourceRules describes what operations on what resources/subresources the webhook should not care about.
+	// The exclude rules take precedence over include rules (if a resource matches both, it is excluded)
+	// +listType=atomic
+	// +optional
+	ExcludeRules []RuleWithOperations `json:"excludeRules,omitempty" protobuf:"bytes,12,rep,name=excludeRules"`
 
 	// FailurePolicy defines how unrecognized errors from the admission endpoint are handled -
 	// allowed values are Ignore or Fail. Defaults to Ignore.

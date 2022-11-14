@@ -14,6 +14,14 @@
           "$ref": "#/definitions/io.k8s.api.admissionregistration.v1.WebhookClientConfig",
           "description": "ClientConfig defines how to communicate with the hook. Required"
         },
+        "excludeRules": {
+          "description": "ExcludeResourceRules describes what operations on what resources/subresources the webhook should not care about. The exclude rules take precedence over include rules (if a resource matches both, it is excluded)",
+          "items": {
+            "$ref": "#/definitions/io.k8s.api.admissionregistration.v1.RuleWithOperations"
+          },
+          "type": "array",
+          "x-kubernetes-list-type": "atomic"
+        },
         "failurePolicy": {
           "description": "FailurePolicy defines how unrecognized errors from the admission endpoint are handled - allowed values are Ignore or Fail. Defaults to Fail.",
           "type": "string"
@@ -214,6 +222,14 @@
         "clientConfig": {
           "$ref": "#/definitions/io.k8s.api.admissionregistration.v1.WebhookClientConfig",
           "description": "ClientConfig defines how to communicate with the hook. Required"
+        },
+        "excludeRules": {
+          "description": "ExcludeResourceRules describes what operations on what resources/subresources the webhook should not care about. The exclude rules take precedence over include rules (if a resource matches both, it is excluded)",
+          "items": {
+            "$ref": "#/definitions/io.k8s.api.admissionregistration.v1.RuleWithOperations"
+          },
+          "type": "array",
+          "x-kubernetes-list-type": "atomic"
         },
         "failurePolicy": {
           "description": "FailurePolicy defines how unrecognized errors from the admission endpoint are handled - allowed values are Ignore or Fail. Defaults to Fail.",

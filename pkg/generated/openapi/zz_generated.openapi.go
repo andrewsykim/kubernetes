@@ -1219,6 +1219,25 @@ func schema_k8sio_api_admissionregistration_v1_MutatingWebhook(ref common.Refere
 							},
 						},
 					},
+					"excludeRules": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-type": "atomic",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "ExcludeResourceRules describes what operations on what resources/subresources the webhook should not care about. The exclude rules take precedence over include rules (if a resource matches both, it is excluded)",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref("k8s.io/api/admissionregistration/v1.RuleWithOperations"),
+									},
+								},
+							},
+						},
+					},
 					"failurePolicy": {
 						SchemaProps: spec.SchemaProps{
 							Description: "FailurePolicy defines how unrecognized errors from the admission endpoint are handled - allowed values are Ignore or Fail. Defaults to Fail.",
@@ -1646,6 +1665,25 @@ func schema_k8sio_api_admissionregistration_v1_ValidatingWebhook(ref common.Refe
 					"rules": {
 						SchemaProps: spec.SchemaProps{
 							Description: "Rules describes what operations on what resources/subresources the webhook cares about. The webhook cares about an operation if it matches _any_ Rule. However, in order to prevent ValidatingAdmissionWebhooks and MutatingAdmissionWebhooks from putting the cluster in a state which cannot be recovered from without completely disabling the plugin, ValidatingAdmissionWebhooks and MutatingAdmissionWebhooks are never called on admission requests for ValidatingWebhookConfiguration and MutatingWebhookConfiguration objects.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref("k8s.io/api/admissionregistration/v1.RuleWithOperations"),
+									},
+								},
+							},
+						},
+					},
+					"excludeRules": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-type": "atomic",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "ExcludeResourceRules describes what operations on what resources/subresources the webhook should not care about. The exclude rules take precedence over include rules (if a resource matches both, it is excluded)",
 							Type:        []string{"array"},
 							Items: &spec.SchemaOrArray{
 								Schema: &spec.Schema{
@@ -2475,6 +2513,25 @@ func schema_k8sio_api_admissionregistration_v1beta1_MutatingWebhook(ref common.R
 							},
 						},
 					},
+					"excludeRules": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-type": "atomic",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "ExcludeResourceRules describes what operations on what resources/subresources the webhook should not care about. The exclude rules take precedence over include rules (if a resource matches both, it is excluded)",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref("k8s.io/api/admissionregistration/v1.RuleWithOperations"),
+									},
+								},
+							},
+						},
+					},
 					"failurePolicy": {
 						SchemaProps: spec.SchemaProps{
 							Description: "FailurePolicy defines how unrecognized errors from the admission endpoint are handled - allowed values are Ignore or Fail. Defaults to Ignore.",
@@ -2722,6 +2779,25 @@ func schema_k8sio_api_admissionregistration_v1beta1_ValidatingWebhook(ref common
 					"rules": {
 						SchemaProps: spec.SchemaProps{
 							Description: "Rules describes what operations on what resources/subresources the webhook cares about. The webhook cares about an operation if it matches _any_ Rule. However, in order to prevent ValidatingAdmissionWebhooks and MutatingAdmissionWebhooks from putting the cluster in a state which cannot be recovered from without completely disabling the plugin, ValidatingAdmissionWebhooks and MutatingAdmissionWebhooks are never called on admission requests for ValidatingWebhookConfiguration and MutatingWebhookConfiguration objects.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref("k8s.io/api/admissionregistration/v1.RuleWithOperations"),
+									},
+								},
+							},
+						},
+					},
+					"excludeRules": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-type": "atomic",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "ExcludeResourceRules describes what operations on what resources/subresources the webhook should not care about. The exclude rules take precedence over include rules (if a resource matches both, it is excluded)",
 							Type:        []string{"array"},
 							Items: &spec.SchemaOrArray{
 								Schema: &spec.Schema{

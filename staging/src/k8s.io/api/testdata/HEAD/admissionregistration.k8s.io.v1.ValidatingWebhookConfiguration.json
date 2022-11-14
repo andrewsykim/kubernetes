@@ -73,6 +73,23 @@
           "scope": "scopeValue"
         }
       ],
+      "excludeRules": [
+        {
+          "operations": [
+            "operationsValue"
+          ],
+          "apiGroups": [
+            "apiGroupsValue"
+          ],
+          "apiVersions": [
+            "apiVersionsValue"
+          ],
+          "resources": [
+            "resourcesValue"
+          ],
+          "scope": "scopeValue"
+        }
+      ],
       "failurePolicy": "failurePolicyValue",
       "matchPolicy": "matchPolicyValue",
       "namespaceSelector": {

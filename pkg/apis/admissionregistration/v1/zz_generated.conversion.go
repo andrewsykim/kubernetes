@@ -157,6 +157,17 @@ func autoConvert_v1_MutatingWebhook_To_admissionregistration_MutatingWebhook(in 
 	} else {
 		out.Rules = nil
 	}
+	if in.ExcludeRules != nil {
+		in, out := &in.ExcludeRules, &out.ExcludeRules
+		*out = make([]admissionregistration.RuleWithOperations, len(*in))
+		for i := range *in {
+			if err := Convert_v1_RuleWithOperations_To_admissionregistration_RuleWithOperations(&(*in)[i], &(*out)[i], s); err != nil {
+				return err
+			}
+		}
+	} else {
+		out.ExcludeRules = nil
+	}
 	out.FailurePolicy = (*admissionregistration.FailurePolicyType)(unsafe.Pointer(in.FailurePolicy))
 	out.MatchPolicy = (*admissionregistration.MatchPolicyType)(unsafe.Pointer(in.MatchPolicy))
 	out.NamespaceSelector = (*metav1.LabelSelector)(unsafe.Pointer(in.NamespaceSelector))
@@ -188,6 +199,17 @@ func autoConvert_admissionregistration_MutatingWebhook_To_v1_MutatingWebhook(in 
 		}
 	} else {
 		out.Rules = nil
+	}
+	if in.ExcludeRules != nil {
+		in, out := &in.ExcludeRules, &out.ExcludeRules
+		*out = make([]v1.RuleWithOperations, len(*in))
+		for i := range *in {
+			if err := Convert_admissionregistration_RuleWithOperations_To_v1_RuleWithOperations(&(*in)[i], &(*out)[i], s); err != nil {
+				return err
+			}
+		}
+	} else {
+		out.ExcludeRules = nil
 	}
 	out.FailurePolicy = (*v1.FailurePolicyType)(unsafe.Pointer(in.FailurePolicy))
 	out.MatchPolicy = (*v1.MatchPolicyType)(unsafe.Pointer(in.MatchPolicy))
@@ -367,6 +389,17 @@ func autoConvert_v1_ValidatingWebhook_To_admissionregistration_ValidatingWebhook
 	} else {
 		out.Rules = nil
 	}
+	if in.ExcludeRules != nil {
+		in, out := &in.ExcludeRules, &out.ExcludeRules
+		*out = make([]admissionregistration.RuleWithOperations, len(*in))
+		for i := range *in {
+			if err := Convert_v1_RuleWithOperations_To_admissionregistration_RuleWithOperations(&(*in)[i], &(*out)[i], s); err != nil {
+				return err
+			}
+		}
+	} else {
+		out.ExcludeRules = nil
+	}
 	out.FailurePolicy = (*admissionregistration.FailurePolicyType)(unsafe.Pointer(in.FailurePolicy))
 	out.MatchPolicy = (*admissionregistration.MatchPolicyType)(unsafe.Pointer(in.MatchPolicy))
 	out.NamespaceSelector = (*metav1.LabelSelector)(unsafe.Pointer(in.NamespaceSelector))
@@ -397,6 +430,17 @@ func autoConvert_admissionregistration_ValidatingWebhook_To_v1_ValidatingWebhook
 		}
 	} else {
 		out.Rules = nil
+	}
+	if in.ExcludeRules != nil {
+		in, out := &in.ExcludeRules, &out.ExcludeRules
+		*out = make([]v1.RuleWithOperations, len(*in))
+		for i := range *in {
+			if err := Convert_admissionregistration_RuleWithOperations_To_v1_RuleWithOperations(&(*in)[i], &(*out)[i], s); err != nil {
+				return err
+			}
+		}
+	} else {
+		out.ExcludeRules = nil
 	}
 	out.FailurePolicy = (*v1.FailurePolicyType)(unsafe.Pointer(in.FailurePolicy))
 	out.MatchPolicy = (*v1.MatchPolicyType)(unsafe.Pointer(in.MatchPolicy))
