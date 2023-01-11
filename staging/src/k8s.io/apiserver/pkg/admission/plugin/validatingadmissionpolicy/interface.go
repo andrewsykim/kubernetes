@@ -48,3 +48,20 @@ type ValidatorCompiler interface {
 		policy *v1alpha1.ValidatingAdmissionPolicy,
 	) Validator
 }
+
+type Mutator interface {
+	Admit(a admission.Attributes, o admission.ObjectInterfaces, matchKind schema.GroupVersionKind) error
+}
+
+type MutatorCompiler interface {
+	admission.InitializationValidator
+
+	// Matches says whether this policy definition matches the provided admission
+	// resource request
+	DefinitionMatches(a admission.Attributes, o admission.ObjectInterfaces, definition *v1alpha1.ValidatingAdmissionPolicy) (bool, schema.GroupVersionKind, error)
+
+	// Compile is used for the cel expression compilation
+	Compile(
+		policy *v1alpha1.ValidatingAdmissionPolicy,
+	) Mutator
+}

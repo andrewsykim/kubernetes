@@ -24,18 +24,24 @@ import (
 
 	celtypes "github.com/google/cel-go/common/types"
 	"github.com/google/cel-go/interpreter"
+	jsonpatch "github.com/evanphx/json-patch"
+	structpb "google.golang.org/protobuf/types/known/structpb"
 
 	admissionv1 "k8s.io/api/admission/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/api/admissionregistration/v1alpha1"
 	authenticationv1 "k8s.io/api/authentication/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/serializer/json"
 	"k8s.io/apimachinery/pkg/labels"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apiserver/pkg/admission"
 	"k8s.io/apiserver/pkg/admission/plugin/validatingadmissionpolicy/matching"
 	"k8s.io/apiserver/pkg/admission/plugin/webhook/generic"
+	// "k8s.io/apimachinery/pkg/util/strategicpatch"
+	"k8s.io/klog/v2"
+
 )
 
 var _ ValidatorCompiler = &CELValidatorCompiler{}
@@ -162,6 +168,11 @@ func policyDecisionActionForError(f v1alpha1.FailurePolicyType) policyDecisionAc
 		return actionAdmit
 	}
 	return actionDeny
+}
+
+func (v *CELValidator) Admit(a admission.Attributes, o admission.ObjectInterfaces, versionedParams runtime.Object, matchKind schema.GroupVersionKind) error {
+	// just compile and print the object val from the expression
+	return nil
 }
 
 // Validate validates all cel expressions in Validator and returns a PolicyDecision for each CEL expression or returns an error.
@@ -315,4 +326,100 @@ func createAdmissionRequest(attr admission.Attributes) *admissionv1.AdmissionReq
 			Object: attr.GetOperationOptions(),
 		},
 	}
+}
+
+// CELMutatorCompiler implement the interface MutatorCompiler.
+type CELMutatorCompiler struct {
+	Matcher *matching.Matcher
+}
+
+// DefinitionMatches returns whether this ValidatingAdmissionPolicy matches the provided admission resource request
+func (c *CELMutatorCompiler) DefinitionMatches(a admission.Attributes, o admission.ObjectInterfaces, definition *v1alpha1.ValidatingAdmissionPolicy) (bool, schema.GroupVersionKind, error) {
+	criteria := matchCriteria{constraints: definition.Spec.MatchConstraints}
+	return c.Matcher.Matches(a, o, &criteria)
+}
+
+// ValidateInitialization checks if Matcher is initialized.
+func (c *CELMutatorCompiler) ValidateInitialization() error {
+	return c.Matcher.ValidateInitialization()
+}
+
+// Compile compiles the cel expression defined in ValidatingAdmissionPolicy
+func (c *CELMutatorCompiler) Compile(p *v1alpha1.ValidatingAdmissionPolicy) Mutator {
+	if len(p.Spec.Validations) == 0 {
+		return nil
+	}
+
+	compilationResults := make([]CompilationResult, len(p.Spec.Validations))
+	for i, validation := range p.Spec.Validations {
+		compilationResults[i] = CompileMutatingPolicyExpression(validation.PatchExpression)
+	}
+	return &CELMutator{policy: p, compilationResults: compilationResults}
+}
+
+// CELMutator implements the Mutator interface
+type CELMutator struct {
+	policy             *v1alpha1.ValidatingAdmissionPolicy
+	compilationResults []CompilationResult
+}
+
+// JSON type constants representing the reflected types of protobuf JSON values.
+var (
+	jsonValueType     = reflect.TypeOf(&structpb.Value{})
+	jsonListValueType = reflect.TypeOf(&structpb.ListValue{})
+	jsonStructType    = reflect.TypeOf(&structpb.Struct{})
+	jsonNullType      = reflect.TypeOf(structpb.NullValue_NULL_VALUE)
+)
+
+
+func (v *CELMutator) Admit(a admission.Attributes, o admission.ObjectInterfaces, matchKind schema.GroupVersionKind) error {
+	for _, compilationResult := range v.compilationResults {
+		evalResult, _, err := compilationResult.Program.Eval(map[string]interface{}{})
+		if err != nil {
+			return err
+		}
+
+		evalConverted, err := evalResult.ConvertToNative(jsonListValueType)
+		if err != nil {
+			return err
+		}
+
+		patchBytes, err := evalConverted.(*structpb.ListValue).MarshalJSON()
+		if err != nil {
+			return err
+		}
+
+		kind := o.GetEquivalentResourceMapper().KindFor(a.GetResource(), a.GetSubresource())
+		versionedAttr, err := generic.NewVersionedAttributes(a, kind, o)
+		if err != nil {
+			return err
+		}
+
+		jsonSerializer := json.NewSerializer(json.DefaultMetaFactory, o.GetObjectCreater(), o.GetObjectTyper(), false)
+		obj, err := runtime.Encode(jsonSerializer, versionedAttr.VersionedObject)
+		if err != nil {
+			return err
+		}
+
+		patchObj, err := jsonpatch.DecodePatch(patchBytes)
+		if err != nil {
+			return err
+		}
+
+		patchedBytes, err := patchObj.Apply(obj)
+		if err != nil {
+			return err
+		}
+
+		var newObject runtime.Object
+		newObject = &unstructured.Unstructured{}
+		if newObject, _, err = jsonSerializer.Decode(patchedBytes, nil, newObject); err != nil {
+			return err
+		}
+
+		if err := o.GetObjectConvertor().Convert(newObject, a.GetObject(), nil); err != nil {
+			return err
+		}
+	}
+	return nil
 }

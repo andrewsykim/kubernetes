@@ -18,6 +18,7 @@ package validatingadmissionpolicy
 
 import (
 	"context"
+
 	"k8s.io/apiserver/pkg/admission"
 )
 
@@ -25,6 +26,7 @@ type CELPolicyEvaluator interface {
 	admission.InitializationValidator
 
 	Validate(ctx context.Context, a admission.Attributes, o admission.ObjectInterfaces) error
+	Admit(ctx context.Context, a admission.Attributes, o admission.ObjectInterfaces) (err error)
 	HasSynced() bool
 	Run(stopCh <-chan struct{})
 }

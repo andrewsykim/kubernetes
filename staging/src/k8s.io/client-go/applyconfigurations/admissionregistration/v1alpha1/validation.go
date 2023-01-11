@@ -25,9 +25,10 @@ import (
 // ValidationApplyConfiguration represents an declarative configuration of the Validation type for use
 // with apply.
 type ValidationApplyConfiguration struct {
-	Expression *string          `json:"expression,omitempty"`
-	Message    *string          `json:"message,omitempty"`
-	Reason     *v1.StatusReason `json:"reason,omitempty"`
+	Expression      *string          `json:"expression,omitempty"`
+	PatchExpression *string          `json:"patchExpression,omitempty"`
+	Message         *string          `json:"message,omitempty"`
+	Reason          *v1.StatusReason `json:"reason,omitempty"`
 }
 
 // ValidationApplyConfiguration constructs an declarative configuration of the Validation type for use with
@@ -41,6 +42,14 @@ func Validation() *ValidationApplyConfiguration {
 // If called multiple times, the Expression field is set to the value of the last call.
 func (b *ValidationApplyConfiguration) WithExpression(value string) *ValidationApplyConfiguration {
 	b.Expression = &value
+	return b
+}
+
+// WithPatchExpression sets the PatchExpression field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the PatchExpression field is set to the value of the last call.
+func (b *ValidationApplyConfiguration) WithPatchExpression(value string) *ValidationApplyConfiguration {
+	b.PatchExpression = &value
 	return b
 }
 

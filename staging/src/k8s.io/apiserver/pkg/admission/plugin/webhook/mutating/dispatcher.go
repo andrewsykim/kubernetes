@@ -304,6 +304,7 @@ func (a *mutatingDispatcher) callAttrMutatingHook(ctx context.Context, h *admiss
 	if len(result.Patch) == 0 {
 		return false, nil
 	}
+
 	patchObj, err := jsonpatch.DecodePatch(result.Patch)
 	if err != nil {
 		return false, apierrors.NewInternalError(err)

@@ -166,6 +166,58 @@ type CompilationResult struct {
 	Error   *apiservercel.Error
 }
 
+func CompileMutatingPolicyExpression(patchExpression string) CompilationResult {
+	var env *cel.Env
+	envs, err := getEnvs()
+	if err != nil {
+		return CompilationResult{
+			Error: &apiservercel.Error{
+				Type:   apiservercel.ErrorTypeInternal,
+				Detail: "compiler initialization failed: " + err.Error(),
+			},
+		}
+	}
+
+	env = envs.noParams
+
+	ast, issues := env.Compile(patchExpression)
+	if issues != nil {
+		return CompilationResult{
+			Error: &apiservercel.Error{
+				Type:   apiservercel.ErrorTypeInvalid,
+				Detail: "compilation failed: " + issues.String(),
+			},
+		}
+	}
+
+	_, err = cel.AstToCheckedExpr(ast)
+	if err != nil {
+		// should be impossible since env.Compile returned no issues
+		return CompilationResult{
+			Error: &apiservercel.Error{
+				Type:   apiservercel.ErrorTypeInternal,
+				Detail: "unexpected compilation error: " + err.Error(),
+			},
+		}
+	}
+	prog, err := env.Program(ast,
+		cel.EvalOptions(cel.OptOptimize),
+		cel.OptimizeRegex(library.ExtensionLibRegexOptimizations...),
+		cel.InterruptCheckFrequency(checkFrequency),
+	)
+	if err != nil {
+		return CompilationResult{
+			Error: &apiservercel.Error{
+				Type:   apiservercel.ErrorTypeInvalid,
+				Detail: "program instantiation failed: " + err.Error(),
+			},
+		}
+	}
+	return CompilationResult{
+		Program: prog,
+	}
+}
+
 // CompileValidatingPolicyExpression returns a compiled vaalidating policy CEL expression.
 func CompileValidatingPolicyExpression(validationExpression string, hasParams bool) CompilationResult {
 	var env *cel.Env

@@ -81,6 +81,7 @@ var _ initializer.WantsDrainedNotification = &celAdmissionPlugin{}
 
 var _ admission.InitializationValidator = &celAdmissionPlugin{}
 var _ admission.ValidationInterface = &celAdmissionPlugin{}
+var _ admission.MutationInterface = &celAdmissionPlugin{}
 
 func NewPlugin() (admission.Interface, error) {
 	return &celAdmissionPlugin{
@@ -176,6 +177,28 @@ func (c *celAdmissionPlugin) Validate(
 	}
 
 	return c.evaluator.Validate(ctx, a, o)
+}
+
+func (c *celAdmissionPlugin) Admit(
+	ctx context.Context,
+	a admission.Attributes,
+	o admission.ObjectInterfaces,
+) (err error) {
+	if !c.enabled {
+		return nil
+	}
+
+	// isPolicyResource determines if an admission.Attributes object is describing
+	// the admission of a ValidatingAdmissionPolicy or a ValidatingAdmissionPolicyBinding
+	if isPolicyResource(a) {
+		return
+	}
+
+	if !c.WaitForReady() {
+		return admission.NewForbidden(a, fmt.Errorf("not yet ready to handle request"))
+	}
+
+	return c.evaluator.Admit(ctx, a, o)
 }
 
 func isPolicyResource(attr admission.Attributes) bool {

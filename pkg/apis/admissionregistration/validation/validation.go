@@ -729,9 +729,10 @@ func validateNamedRuleWithOperations(n *admissionregistration.NamedRuleWithOpera
 func validateValidation(v *admissionregistration.Validation, paramKind *admissionregistration.ParamKind, fldPath *field.Path) field.ErrorList {
 	var allErrors field.ErrorList
 	trimmedExpression := strings.TrimSpace(v.Expression)
+	trimmedPatchExpression := strings.TrimSpace(v.PatchExpression)
 	trimmedMsg := strings.TrimSpace(v.Message)
 	if len(trimmedExpression) == 0 {
-		allErrors = append(allErrors, field.Required(fldPath.Child("expression"), "expression is not specified"))
+		// allErrors = append(allErrors, field.Required(fldPath.Child("expression"), "expression is not specified"))
 	} else {
 		result := plugincel.CompileValidatingPolicyExpression(trimmedExpression, paramKind != nil)
 		if result.Error != nil {
@@ -747,6 +748,25 @@ func validateValidation(v *admissionregistration.Validation, paramKind *admissio
 			}
 		}
 	}
+
+	if len(trimmedPatchExpression) == 0 {
+		// TODO
+	} else {
+		result := plugincel.CompileMutatingPolicyExpression(trimmedPatchExpression)
+		if result.Error != nil {
+			switch result.Error.Type {
+			case cel.ErrorTypeRequired:
+				allErrors = append(allErrors, field.Required(fldPath.Child("patchExpression"), result.Error.Detail))
+			case cel.ErrorTypeInvalid:
+				allErrors = append(allErrors, field.Invalid(fldPath.Child("patchExpression"), v.PatchExpression, result.Error.Detail))
+			case cel.ErrorTypeInternal:
+				allErrors = append(allErrors, field.InternalError(fldPath.Child("patchExpression"), result.Error))
+			default:
+				allErrors = append(allErrors, field.InternalError(fldPath.Child("patchExpression"), fmt.Errorf("unsupported error type: %w", result.Error)))
+			}
+		}
+	}
+
 	if len(v.Message) > 0 && len(trimmedMsg) == 0 {
 		allErrors = append(allErrors, field.Invalid(fldPath.Child("message"), v.Message, "message must be non-empty if specified"))
 	} else if hasNewlines(trimmedMsg) {

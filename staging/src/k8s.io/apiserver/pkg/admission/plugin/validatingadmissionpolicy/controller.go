@@ -40,6 +40,7 @@ import (
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
+	"k8s.io/klog/v2"
 )
 
 var _ CELPolicyEvaluator = &celAdmissionController{}
@@ -60,6 +61,8 @@ type celAdmissionController struct {
 	// Provided to the policy's Compile function as an injected dependency to
 	// assist with compiling its expressions to CEL
 	validatorCompiler ValidatorCompiler
+
+	mutatorCompiler MutatorCompiler
 
 	// Lock which protects:
 	//	- definitionInfo
@@ -134,6 +137,9 @@ func NewAdmissionController(
 	validatorCompiler := &CELValidatorCompiler{
 		Matcher: matcher,
 	}
+	mutatorCompiler := &CELMutatorCompiler{
+		Matcher: matcher,
+	}
 	c := &celAdmissionController{
 		definitionInfo:        make(map[namespacedName]*definitionInfo),
 		bindingInfos:          make(map[namespacedName]*bindingInfo),
@@ -141,6 +147,7 @@ func NewAdmissionController(
 		definitionsToBindings: make(map[namespacedName]sets.Set[namespacedName]),
 		dynamicClient:         dynamicClient,
 		validatorCompiler:     validatorCompiler,
+		mutatorCompiler: mutatorCompiler,
 		restMapper:            restMapper,
 	}
 
@@ -195,6 +202,42 @@ func (c *celAdmissionController) Run(stopCh <-chan struct{}) {
 	<-stopCh
 	cancel()
 	wg.Wait()
+}
+
+func (c *celAdmissionController) Admit(
+	ctx context.Context,
+	a admission.Attributes,
+	o admission.ObjectInterfaces,
+) (err error) {
+	c.mutex.RLock()
+	defer c.mutex.RUnlock()
+
+	for _, definitionInfo := range c.definitionInfo {
+		definition := definitionInfo.lastReconciledValue
+		matches, matchKind, err := c.mutatorCompiler.DefinitionMatches(a, o, definition)
+		if err != nil {
+			// Configuration error.
+			// TODO: log err
+			klog.Errorf("[andrewsy] celAdmissionController DefinitionMatches err: %v", err)
+			continue
+		}
+		if !matches {
+			// Policy definition does not match request
+			continue
+		} else if definitionInfo.configurationError != nil {
+			// Configuration error.
+			// TODO: log err
+			klog.Errorf("[andrewsy] celAdmissionController DefinitionMatches configurationError: %v", definitionInfo.configurationError)
+			continue
+		}
+
+		mutator := c.mutatorCompiler.Compile(definition)
+		if err := mutator.Admit(a, o, matchKind); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func (c *celAdmissionController) Validate(

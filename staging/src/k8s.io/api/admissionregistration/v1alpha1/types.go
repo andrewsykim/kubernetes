@@ -171,6 +171,10 @@ type Validation struct {
 	//     non-intersecting keys are appended, retaining their partial order.
 	// Required.
 	Expression string `json:"expression" protobuf:"bytes,1,opt,name=Expression"`
+	// PatchExpression represents a CEL expression used for patching objects
+	// Just for prototyping and will be moved to new object
+	// +optional
+	PatchExpression string `json:"patchExpression" protobuf:"bytes,4,opt,name=PatchExpression"`
 	// Message represents the message displayed when validation fails. The message is required if the Expression contains
 	// line breaks. The message must not contain line breaks.
 	// If unset, the message is "failed rule: {Rule}".
