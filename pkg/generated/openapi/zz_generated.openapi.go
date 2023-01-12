@@ -2426,6 +2426,14 @@ func schema_k8sio_api_admissionregistration_v1alpha1_Validation(ref common.Refer
 							Format:      "",
 						},
 					},
+					"patchType": {
+						SchemaProps: spec.SchemaProps{
+							Description: "PatchType represents the patch strategy to use when patching objects. Supported values are 'JSONPatch', 'MergePatch' and 'StrategicMergePatch' Just for prototyping and will be moved to new object",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
 					"message": {
 						SchemaProps: spec.SchemaProps{
 							Description: "Message represents the message displayed when validation fails. The message is required if the Expression contains line breaks. The message must not contain line breaks. If unset, the message is \"failed rule: {Rule}\". e.g. \"must be a URL with the host matching spec.host\" If the Expression contains line breaks. Message is required. The message must not contain line breaks. If unset, the message is \"failed Expression: {Expression}\".",

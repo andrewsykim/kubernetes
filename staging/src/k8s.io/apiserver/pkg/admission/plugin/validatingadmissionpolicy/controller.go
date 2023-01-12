@@ -147,7 +147,7 @@ func NewAdmissionController(
 		definitionsToBindings: make(map[namespacedName]sets.Set[namespacedName]),
 		dynamicClient:         dynamicClient,
 		validatorCompiler:     validatorCompiler,
-		mutatorCompiler: mutatorCompiler,
+		mutatorCompiler:       mutatorCompiler,
 		restMapper:            restMapper,
 	}
 

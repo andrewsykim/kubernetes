@@ -123,6 +123,7 @@
       {
         "expression": "expressionValue",
         "patchExpression": "patchExpressionValue",
+        "patchType": "patchTypeValue",
         "message": "messageValue",
         "reason": "reasonValue"
       }

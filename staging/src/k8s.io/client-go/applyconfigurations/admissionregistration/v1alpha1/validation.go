@@ -27,6 +27,7 @@ import (
 type ValidationApplyConfiguration struct {
 	Expression      *string          `json:"expression,omitempty"`
 	PatchExpression *string          `json:"patchExpression,omitempty"`
+	PatchType       *string          `json:"patchType,omitempty"`
 	Message         *string          `json:"message,omitempty"`
 	Reason          *v1.StatusReason `json:"reason,omitempty"`
 }
@@ -50,6 +51,14 @@ func (b *ValidationApplyConfiguration) WithExpression(value string) *ValidationA
 // If called multiple times, the PatchExpression field is set to the value of the last call.
 func (b *ValidationApplyConfiguration) WithPatchExpression(value string) *ValidationApplyConfiguration {
 	b.PatchExpression = &value
+	return b
+}
+
+// WithPatchType sets the PatchType field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the PatchType field is set to the value of the last call.
+func (b *ValidationApplyConfiguration) WithPatchType(value string) *ValidationApplyConfiguration {
+	b.PatchType = &value
 	return b
 }
 

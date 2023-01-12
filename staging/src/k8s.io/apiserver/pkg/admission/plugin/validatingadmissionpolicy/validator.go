@@ -22,26 +22,25 @@ import (
 	"strings"
 	"time"
 
+	jsonpatch "github.com/evanphx/json-patch"
 	celtypes "github.com/google/cel-go/common/types"
 	"github.com/google/cel-go/interpreter"
-	jsonpatch "github.com/evanphx/json-patch"
 	structpb "google.golang.org/protobuf/types/known/structpb"
 
 	admissionv1 "k8s.io/api/admission/v1"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/api/admissionregistration/v1alpha1"
 	authenticationv1 "k8s.io/api/authentication/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime/serializer/json"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/runtime/serializer/json"
 	"k8s.io/apiserver/pkg/admission"
 	"k8s.io/apiserver/pkg/admission/plugin/validatingadmissionpolicy/matching"
 	"k8s.io/apiserver/pkg/admission/plugin/webhook/generic"
 	// "k8s.io/apimachinery/pkg/util/strategicpatch"
-	"k8s.io/klog/v2"
-
+	// "k8s.io/klog/v2"
 )
 
 var _ ValidatorCompiler = &CELValidatorCompiler{}
@@ -371,10 +370,33 @@ var (
 	jsonNullType      = reflect.TypeOf(structpb.NullValue_NULL_VALUE)
 )
 
-
 func (v *CELMutator) Admit(a admission.Attributes, o admission.ObjectInterfaces, matchKind schema.GroupVersionKind) error {
+	versionedAttr, err := generic.NewVersionedAttributes(a, matchKind, o)
+	if err != nil {
+		return err
+	}
+	oldObjectVal, err := objectToResolveVal(versionedAttr.VersionedOldObject)
+	if err != nil {
+		return err
+	}
+	objectVal, err := objectToResolveVal(versionedAttr.VersionedObject)
+	if err != nil {
+		return err
+	}
+
+	request := createAdmissionRequest(versionedAttr.Attributes)
+	requestVal, err := convertObjectToUnstructured(request)
+	if err != nil {
+		return err
+	}
+	va := &validationActivation{
+		object:    objectVal,
+		oldObject: oldObjectVal,
+		request:   requestVal.Object,
+	}
+
 	for _, compilationResult := range v.compilationResults {
-		evalResult, _, err := compilationResult.Program.Eval(map[string]interface{}{})
+		evalResult, _, err := compilationResult.Program.Eval(va)
 		if err != nil {
 			return err
 		}
@@ -389,11 +411,11 @@ func (v *CELMutator) Admit(a admission.Attributes, o admission.ObjectInterfaces,
 			return err
 		}
 
-		kind := o.GetEquivalentResourceMapper().KindFor(a.GetResource(), a.GetSubresource())
-		versionedAttr, err := generic.NewVersionedAttributes(a, kind, o)
-		if err != nil {
-			return err
-		}
+		//kind := o.GetEquivalentResourceMapper().KindFor(a.GetResource(), a.GetSubresource())
+		//versionedAttr, err := generic.NewVersionedAttributes(a, kind, o)
+		//if err != nil {
+		//	return err
+		//}
 
 		jsonSerializer := json.NewSerializer(json.DefaultMetaFactory, o.GetObjectCreater(), o.GetObjectTyper(), false)
 		obj, err := runtime.Encode(jsonSerializer, versionedAttr.VersionedObject)

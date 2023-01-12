@@ -511,6 +511,7 @@ func Convert_admissionregistration_ValidatingAdmissionPolicySpec_To_v1alpha1_Val
 func autoConvert_v1alpha1_Validation_To_admissionregistration_Validation(in *v1alpha1.Validation, out *admissionregistration.Validation, s conversion.Scope) error {
 	out.Expression = in.Expression
 	out.PatchExpression = in.PatchExpression
+	out.PatchType = in.PatchType
 	out.Message = in.Message
 	out.Reason = (*v1.StatusReason)(unsafe.Pointer(in.Reason))
 	return nil
@@ -524,6 +525,7 @@ func Convert_v1alpha1_Validation_To_admissionregistration_Validation(in *v1alpha
 func autoConvert_admissionregistration_Validation_To_v1alpha1_Validation(in *admissionregistration.Validation, out *v1alpha1.Validation, s conversion.Scope) error {
 	out.Expression = in.Expression
 	out.PatchExpression = in.PatchExpression
+	out.PatchType = in.PatchType
 	out.Message = in.Message
 	out.Reason = (*v1.StatusReason)(unsafe.Pointer(in.Reason))
 	return nil

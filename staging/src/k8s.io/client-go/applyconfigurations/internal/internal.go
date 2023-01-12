@@ -385,6 +385,10 @@ var schemaYAML = typed.YAMLObject(`types:
       type:
         scalar: string
       default: ""
+    - name: patchType
+      type:
+        scalar: string
+      default: ""
     - name: reason
       type:
         scalar: string

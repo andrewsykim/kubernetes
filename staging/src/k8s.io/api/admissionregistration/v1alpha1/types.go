@@ -175,6 +175,11 @@ type Validation struct {
 	// Just for prototyping and will be moved to new object
 	// +optional
 	PatchExpression string `json:"patchExpression" protobuf:"bytes,4,opt,name=PatchExpression"`
+	// PatchType represents the patch strategy to use when patching objects.
+	// Supported values are 'JSONPatch', 'MergePatch' and 'StrategicMergePatch'
+	// Just for prototyping and will be moved to new object
+	// +optional
+	PatchType string `json:"patchType" protobuf:"bytes,5,opt,name=PatchType"`
 	// Message represents the message displayed when validation fails. The message is required if the Expression contains
 	// line breaks. The message must not contain line breaks.
 	// If unset, the message is "failed rule: {Rule}".

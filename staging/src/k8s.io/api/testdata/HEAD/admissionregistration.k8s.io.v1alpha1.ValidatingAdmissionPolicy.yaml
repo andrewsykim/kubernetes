@@ -83,4 +83,5 @@ spec:
   - expression: expressionValue
     message: messageValue
     patchExpression: patchExpressionValue
+    patchType: patchTypeValue
     reason: reasonValue
