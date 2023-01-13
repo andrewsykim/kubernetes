@@ -71,7 +71,7 @@ func getEnvs() (*envs, error) {
 // If any changes are made here, consider to make the same changes there as well.
 func buildBaseEnv() (*cel.Env, error) {
 	var opts []cel.EnvOption
-	opts = append(opts, cel.HomogeneousAggregateLiterals())
+	// opts = append(opts, cel.HomogeneousAggregateLiterals())
 	// Validate function declarations once during base env initialization,
 	// so they don't need to be evaluated each time a CEL rule is compiled.
 	// This is a relatively expensive operation.

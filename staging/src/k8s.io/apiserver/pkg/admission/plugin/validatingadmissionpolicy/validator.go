@@ -395,6 +395,8 @@ func (v *CELMutator) Admit(a admission.Attributes, o admission.ObjectInterfaces,
 		request:   requestVal.Object,
 	}
 
+	jsonSerializer := json.NewSerializer(json.DefaultMetaFactory, o.GetObjectCreater(), o.GetObjectTyper(), false)
+	var patches jsonpatch.Patch
 	for _, compilationResult := range v.compilationResults {
 		evalResult, _, err := compilationResult.Program.Eval(va)
 		if err != nil {
@@ -411,37 +413,33 @@ func (v *CELMutator) Admit(a admission.Attributes, o admission.ObjectInterfaces,
 			return err
 		}
 
-		//kind := o.GetEquivalentResourceMapper().KindFor(a.GetResource(), a.GetSubresource())
-		//versionedAttr, err := generic.NewVersionedAttributes(a, kind, o)
-		//if err != nil {
-		//	return err
-		//}
-
-		jsonSerializer := json.NewSerializer(json.DefaultMetaFactory, o.GetObjectCreater(), o.GetObjectTyper(), false)
-		obj, err := runtime.Encode(jsonSerializer, versionedAttr.VersionedObject)
-		if err != nil {
-			return err
-		}
-
 		patchObj, err := jsonpatch.DecodePatch(patchBytes)
 		if err != nil {
 			return err
 		}
 
-		patchedBytes, err := patchObj.Apply(obj)
-		if err != nil {
-			return err
-		}
-
-		var newObject runtime.Object
-		newObject = &unstructured.Unstructured{}
-		if newObject, _, err = jsonSerializer.Decode(patchedBytes, nil, newObject); err != nil {
-			return err
-		}
-
-		if err := o.GetObjectConvertor().Convert(newObject, a.GetObject(), nil); err != nil {
-			return err
-		}
+		patches = append(patches, patchObj...)
 	}
+
+	obj, err := runtime.Encode(jsonSerializer, versionedAttr.VersionedObject)
+	if err != nil {
+		return err
+	}
+
+	patchedBytes, err := patches.Apply(obj)
+	if err != nil {
+		return err
+	}
+
+	var newObject runtime.Object
+	newObject = &unstructured.Unstructured{}
+	if newObject, _, err = jsonSerializer.Decode(patchedBytes, nil, newObject); err != nil {
+		return err
+	}
+
+	if err := o.GetObjectConvertor().Convert(newObject, a.GetObject(), nil); err != nil {
+		return err
+	}
+
 	return nil
 }
