@@ -21,6 +21,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apiserver/pkg/admission"
+	"k8s.io/apiserver/pkg/admission/plugin/cel"
 	"k8s.io/apiserver/pkg/admission/plugin/webhook"
 )
 
@@ -46,4 +47,22 @@ type Dispatcher interface {
 	// the namespaceSelector or the objectSelector of the hook does not
 	// match. A non-nil error means the request is rejected.
 	Dispatch(ctx context.Context, a admission.Attributes, o admission.ObjectInterfaces, hooks []webhook.WebhookAccessor) error
+}
+
+// Matcher contains logic for converting Evaluations to bool of matches or does not match
+type Matcher interface {
+	// Match is used to take cel evaluations and convert into decisions
+	Match(versionedAttr *admission.VersionedAttributes) (bool, string, error)
+}
+
+var _ cel.ExpressionAccessor = &MatchCondition{}
+
+// MatchCondition contains the inputs needed to compile, evaluate and validate a cel expression
+type MatchCondition struct {
+	Name string
+	Expression string
+}
+
+func (v *MatchCondition) GetExpression() string {
+	return v.Expression
 }

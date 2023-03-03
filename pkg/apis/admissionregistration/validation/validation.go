@@ -19,6 +19,7 @@ package validation
 import (
 	"fmt"
 	"k8s.io/apiserver/pkg/admission/plugin/validatingadmissionpolicy"
+	"k8s.io/apiserver/pkg/admission/plugin/webhook/generic"
 	"regexp"
 	"strings"
 
@@ -228,6 +229,9 @@ func validateValidatingWebhookConfiguration(e *admissionregistration.ValidatingW
 				hookNames.Insert(hook.Name)
 			}
 		}
+		for j, matchCondition := range hook.MatchConditions {
+			allErrors = append(allErrors, validateMatchCondition(&matchCondition, field.NewPath("webhooks").Index(i).Child("matchConditions").Index(j))...)
+		}
 	}
 	return allErrors
 }
@@ -262,6 +266,9 @@ func validateMutatingWebhookConfiguration(e *admissionregistration.MutatingWebho
 			} else {
 				hookNames.Insert(hook.Name)
 			}
+		}
+		for j, matchCondition := range hook.MatchConditions {
+			allErrors = append(allErrors, validateMatchCondition(&matchCondition, field.NewPath("webhooks").Index(i).Child("matchConditions").Index(j))...)
 		}
 	}
 	return allErrors
@@ -724,6 +731,40 @@ func validateNamedRuleWithOperations(n *admissionregistration.NamedRuleWithOpera
 		}
 	}
 	allErrors = append(allErrors, validateRuleWithOperations(&n.RuleWithOperations, fldPath)...)
+	return allErrors
+}
+
+func validateMatchCondition(v *admissionregistration.MatchCondition, fldPath *field.Path) field.ErrorList {
+	var allErrors field.ErrorList
+	trimmedExpression := strings.TrimSpace(v.Expression)
+	trimmedName := strings.TrimSpace(v.Name)
+	if len(trimmedExpression) == 0 {
+		allErrors = append(allErrors, field.Required(fldPath.Child("expression"), "expression is not specified"))
+	} else {
+		result := plugincel.CompileCELExpression(&generic.MatchCondition{
+			Expression: trimmedExpression,
+			Name:    v.Name,
+		}, false)
+		if result.Error != nil {
+			switch result.Error.Type {
+			case cel.ErrorTypeRequired:
+				allErrors = append(allErrors, field.Required(fldPath.Child("expression"), result.Error.Detail))
+			case cel.ErrorTypeInvalid:
+				allErrors = append(allErrors, field.Invalid(fldPath.Child("expression"), v.Expression, result.Error.Detail))
+			case cel.ErrorTypeInternal:
+				allErrors = append(allErrors, field.InternalError(fldPath.Child("expression"), result.Error))
+			default:
+				allErrors = append(allErrors, field.InternalError(fldPath.Child("expression"), fmt.Errorf("unsupported error type: %w", result.Error)))
+			}
+		}
+	}
+	if len(v.Name) > 0 && len(trimmedName) == 0 {
+		allErrors = append(allErrors, field.Invalid(fldPath.Child("name"), v.Name, "name must be non-empty if specified"))
+	} else if hasNewlines(trimmedName) {
+		allErrors = append(allErrors, field.Invalid(fldPath.Child("name"), v.Name, "name must not contain line breaks"))
+	} else if hasNewlines(trimmedName) && trimmedName == "" {
+		allErrors = append(allErrors, field.Required(fldPath.Child("name"), "name must be specified if expression contains line breaks"))
+	}
 	return allErrors
 }
 

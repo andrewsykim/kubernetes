@@ -18,8 +18,6 @@ package validatingadmissionpolicy
 
 import (
 	"fmt"
-	"k8s.io/apiserver/pkg/admission"
-	"k8s.io/klog/v2"
 	"strings"
 
 	celtypes "github.com/google/cel-go/common/types"
@@ -27,7 +25,9 @@ import (
 	v1 "k8s.io/api/admissionregistration/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apiserver/pkg/admission"
 	"k8s.io/apiserver/pkg/admission/plugin/cel"
+	"k8s.io/klog/v2"
 )
 
 // validator implements the Validator interface

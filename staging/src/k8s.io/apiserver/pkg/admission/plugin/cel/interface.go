@@ -60,6 +60,8 @@ type FilterCompiler interface {
 // by the underlying CEL code (which is indicated by the match criteria of a policy definition).
 // versionedParams may be nil.
 type Filter interface {
+	//TODO: optimization opportunity here to reuse a lot of these values through the whole admission step for a given request
+
 	// ForInput converts compiled CEL-typed values into evaluated CEL-typed values
 	ForInput(versionedAttr *admission.VersionedAttributes, versionedParams runtime.Object, request *v1.AdmissionRequest) ([]EvaluationResult, error)
 

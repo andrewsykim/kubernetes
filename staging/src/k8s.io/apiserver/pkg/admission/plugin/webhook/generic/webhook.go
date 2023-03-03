@@ -20,7 +20,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-
 	admissionv1 "k8s.io/api/admission/v1"
 	admissionv1beta1 "k8s.io/api/admission/v1beta1"
 	"k8s.io/api/admissionregistration/v1"
@@ -28,6 +27,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apiserver/pkg/admission"
 	genericadmissioninit "k8s.io/apiserver/pkg/admission/initializer"
+	"k8s.io/apiserver/pkg/admission/plugin/cel"
 	"k8s.io/apiserver/pkg/admission/plugin/webhook"
 	"k8s.io/apiserver/pkg/admission/plugin/webhook/config"
 	"k8s.io/apiserver/pkg/admission/plugin/webhook/predicates/namespace"
@@ -36,6 +36,7 @@ import (
 	webhookutil "k8s.io/apiserver/pkg/util/webhook"
 	"k8s.io/client-go/informers"
 	clientset "k8s.io/client-go/kubernetes"
+	"k8s.io/klog/v2"
 )
 
 // Webhook is an abstract admission plugin with all the infrastructure to define Admit or Validate on-top.
@@ -49,6 +50,7 @@ type Webhook struct {
 	namespaceMatcher *namespace.Matcher
 	objectMatcher    *object.Matcher
 	dispatcher       Dispatcher
+	filterCompiler cel.FilterCompiler
 }
 
 var (
@@ -92,6 +94,7 @@ func NewWebhook(handler *admission.Handler, configFile io.Reader, sourceFactory 
 		namespaceMatcher: &namespace.Matcher{},
 		objectMatcher:    &object.Matcher{},
 		dispatcher:       dispatcherFactory(&cm),
+		filterCompiler: cel.NewFilterCompiler(),
 	}, nil
 }
 
@@ -206,6 +209,25 @@ func (a *Webhook) ShouldCallHook(h webhook.WebhookAccessor, attr admission.Attri
 	if matchObjErr != nil {
 		return nil, matchObjErr
 	}
+
+	matchConditions := h.GetMatchConditions()
+	expressions := make([]cel.ExpressionAccessor, len(matchConditions))
+	for i, matchCondition := range matchConditions {
+		expressions[i] = &MatchCondition{
+			Name: matchCondition.Name,
+			Expression: matchCondition.Expression,
+		}
+	}
+	matcher := NewMatcher(a.filterCompiler.Compile(expressions, false))
+	versionedAttr, err := admission.NewVersionedAttributes(attr, attr.GetKind(), o)
+	if err == nil {
+		if matchesCondition, matchConditionName, err := matcher.Match(versionedAttr); !matchesCondition || err != nil {
+			klog.V(5).Infof("Did not call webhook due to match condition %v", matchConditionName)
+			//TODO: metric
+			return nil, nil
+		}
+	}
+
 
 	return invocation, nil
 }
