@@ -17,13 +17,13 @@ limitations under the License.
 package cel
 
 import (
+	"k8s.io/apiserver/pkg/admission"
 	"time"
 
 	"github.com/google/cel-go/common/types/ref"
 
 	v1 "k8s.io/api/admission/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apiserver/pkg/admission/plugin/webhook/generic"
 )
 
 var _ ExpressionAccessor = &MatchCondition{}
@@ -61,7 +61,7 @@ type FilterCompiler interface {
 // versionedParams may be nil.
 type Filter interface {
 	// ForInput converts compiled CEL-typed values into evaluated CEL-typed values
-	ForInput(versionedAttr *generic.VersionedAttributes, versionedParams runtime.Object, request *v1.AdmissionRequest) ([]EvaluationResult, error)
+	ForInput(versionedAttr *admission.VersionedAttributes, versionedParams runtime.Object, request *v1.AdmissionRequest) ([]EvaluationResult, error)
 
 	// CompilationErrors returns a list of errors from the compilation of the evaluator
 	CompilationErrors() []error

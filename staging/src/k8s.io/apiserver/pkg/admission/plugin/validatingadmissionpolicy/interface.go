@@ -23,7 +23,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apiserver/pkg/admission"
 	"k8s.io/apiserver/pkg/admission/plugin/cel"
-	"k8s.io/apiserver/pkg/admission/plugin/webhook/generic"
 )
 
 var _ cel.ExpressionAccessor = &ValidationCondition{}
@@ -55,5 +54,5 @@ type Matcher interface {
 // Validator is contains logic for converting ValidationEvaluation to PolicyDecisions
 type Validator interface {
 	// Validate is used to take cel evaluations and convert into decisions
-	Validate(versionedAttr *generic.VersionedAttributes, versionedParams runtime.Object) []PolicyDecision
+	Validate(versionedAttr *admission.VersionedAttributes, versionedParams runtime.Object) []PolicyDecision
 }

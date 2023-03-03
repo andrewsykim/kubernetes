@@ -30,7 +30,6 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apiserver/pkg/admission"
-	"k8s.io/apiserver/pkg/admission/plugin/webhook/generic"
 )
 
 // filterCompiler implement the interface FilterCompiler.
@@ -115,7 +114,7 @@ func objectToResolveVal(r runtime.Object) (interface{}, error) {
 
 // Evaluate evaluates the compiled CEL expressions converting them into CELEvaluations
 // errors per evaluation are returned on the Evaluation object
-func (f *filter) ForInput(versionedAttr *generic.VersionedAttributes, versionedParams runtime.Object, request *admissionv1.AdmissionRequest) ([]EvaluationResult, error) {
+func (f *filter) ForInput(versionedAttr *admission.VersionedAttributes, versionedParams runtime.Object, request *admissionv1.AdmissionRequest) ([]EvaluationResult, error) {
 	// TODO: replace unstructured with ref.Val for CEL variables when native type support is available
 	evaluations := make([]EvaluationResult, len(f.compilationResults))
 	var err error

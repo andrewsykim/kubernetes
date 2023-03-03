@@ -32,7 +32,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apiserver/pkg/admission"
 	"k8s.io/apiserver/pkg/admission/plugin/cel"
-	"k8s.io/apiserver/pkg/admission/plugin/webhook/generic"
 )
 
 var _ cel.Filter = &fakeCelFilter{}
@@ -42,7 +41,7 @@ type fakeCelFilter struct {
 	throwError  bool
 }
 
-func (f *fakeCelFilter) ForInput(versionedAttr *generic.VersionedAttributes, versionedParams runtime.Object, request *admissionv1.AdmissionRequest) ([]cel.EvaluationResult, error) {
+func (f *fakeCelFilter) ForInput(versionedAttr *admission.VersionedAttributes, versionedParams runtime.Object, request *admissionv1.AdmissionRequest) ([]cel.EvaluationResult, error) {
 	if f.throwError {
 		return nil, errors.New("test error")
 	}
@@ -61,7 +60,7 @@ func TestValidate(t *testing.T) {
 	unauthorizedReason := metav1.StatusReasonUnauthorized
 
 	fakeAttr := admission.NewAttributesRecord(nil, nil, schema.GroupVersionKind{}, "default", "foo", schema.GroupVersionResource{}, "", admission.Create, nil, false, nil)
-	fakeVersionedAttr, _ := generic.NewVersionedAttributes(fakeAttr, schema.GroupVersionKind{}, nil)
+	fakeVersionedAttr, _ := admission.NewVersionedAttributes(fakeAttr, schema.GroupVersionKind{}, nil)
 
 	cases := []struct {
 		name           string

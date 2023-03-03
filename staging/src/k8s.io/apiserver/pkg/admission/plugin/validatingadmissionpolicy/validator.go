@@ -18,6 +18,7 @@ package validatingadmissionpolicy
 
 import (
 	"fmt"
+	"k8s.io/apiserver/pkg/admission"
 	"k8s.io/klog/v2"
 	"strings"
 
@@ -27,7 +28,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apiserver/pkg/admission/plugin/cel"
-	"k8s.io/apiserver/pkg/admission/plugin/webhook/generic"
 )
 
 // validator implements the Validator interface
@@ -51,7 +51,7 @@ func policyDecisionActionForError(f v1.FailurePolicyType) PolicyDecisionAction {
 }
 
 // Validate takes a list of Evaluation and a failure policy and converts them into actionable PolicyDecisions
-func (v *validator) Validate(versionedAttr *generic.VersionedAttributes, versionedParams runtime.Object) []PolicyDecision {
+func (v *validator) Validate(versionedAttr *admission.VersionedAttributes, versionedParams runtime.Object) []PolicyDecision {
 	var f v1.FailurePolicyType
 	if v.failPolicy == nil {
 		f = v1.Fail

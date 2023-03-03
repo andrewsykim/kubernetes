@@ -209,3 +209,117 @@ func checkKeyFormat(key string) error {
 	}
 	return nil
 }
+
+// VersionedAttributes is a wrapper around the original admission attributes, adding versioned
+// variants of the object and old object.
+type VersionedAttributes struct {
+	// Attributes holds the original admission attributes
+	Attributes
+	// VersionedOldObject holds Attributes.OldObject (if non-nil), converted to VersionedKind.
+	// It must never be mutated.
+	VersionedOldObject runtime.Object
+	// VersionedObject holds Attributes.Object (if non-nil), converted to VersionedKind.
+	// If mutated, Dirty must be set to true by the mutator.
+	VersionedObject runtime.Object
+	// VersionedKind holds the fully qualified kind
+	VersionedKind schema.GroupVersionKind
+	// Dirty indicates VersionedObject has been modified since being converted from Attributes.Object
+	Dirty bool
+}
+
+// GetObject overrides the Attributes.GetObject()
+func (v *VersionedAttributes) GetObject() runtime.Object {
+	if v.VersionedObject != nil {
+		return v.VersionedObject
+	}
+	return v.Attributes.GetObject()
+}
+
+// NewVersionedAttributes returns versioned attributes with the old and new object (if non-nil) converted to the requested kind
+func NewVersionedAttributes(attr Attributes, gvk schema.GroupVersionKind, o ObjectInterfaces) (*VersionedAttributes, error) {
+	// convert the old and new objects to the requested version
+	versionedAttr := &VersionedAttributes{
+		Attributes:    attr,
+		VersionedKind: gvk,
+	}
+	if oldObj := attr.GetOldObject(); oldObj != nil {
+		out, err := ConvertToGVK(oldObj, gvk, o)
+		if err != nil {
+			return nil, err
+		}
+		versionedAttr.VersionedOldObject = out
+	}
+	if obj := attr.GetObject(); obj != nil {
+		out, err := ConvertToGVK(obj, gvk, o)
+		if err != nil {
+			return nil, err
+		}
+		versionedAttr.VersionedObject = out
+	}
+	return versionedAttr, nil
+}
+
+// ConvertVersionedAttributes converts VersionedObject and VersionedOldObject to the specified kind, if needed.
+// If attr.VersionedKind already matches the requested kind, no conversion is performed.
+// If conversion is required:
+// * attr.VersionedObject is used as the source for the new object if Dirty=true (and is round-tripped through attr.Attributes.Object, clearing Dirty in the process)
+// * attr.Attributes.Object is used as the source for the new object if Dirty=false
+// * attr.Attributes.OldObject is used as the source for the old object
+func ConvertVersionedAttributes(attr *VersionedAttributes, gvk schema.GroupVersionKind, o ObjectInterfaces) error {
+	// we already have the desired kind, we're done
+	if attr.VersionedKind == gvk {
+		return nil
+	}
+
+	// convert the original old object to the desired GVK
+	if oldObj := attr.Attributes.GetOldObject(); oldObj != nil {
+		out, err := ConvertToGVK(oldObj, gvk, o)
+		if err != nil {
+			return err
+		}
+		attr.VersionedOldObject = out
+	}
+
+	if attr.VersionedObject != nil {
+		// convert the existing versioned object to internal
+		if attr.Dirty {
+			err := o.GetObjectConvertor().Convert(attr.VersionedObject, attr.Attributes.GetObject(), nil)
+			if err != nil {
+				return err
+			}
+		}
+
+		// and back to external
+		out, err := ConvertToGVK(attr.Attributes.GetObject(), gvk, o)
+		if err != nil {
+			return err
+		}
+		attr.VersionedObject = out
+	}
+
+	// Remember we converted to this version
+	attr.VersionedKind = gvk
+	attr.Dirty = false
+
+	return nil
+}
+
+// ConvertToGVK converts object to the desired gvk.
+func ConvertToGVK(obj runtime.Object, gvk schema.GroupVersionKind, o ObjectInterfaces) (runtime.Object, error) {
+	// Unlike other resources, custom resources do not have internal version, so
+	// if obj is a custom resource, it should not need conversion.
+	if obj.GetObjectKind().GroupVersionKind() == gvk {
+		return obj, nil
+	}
+	out, err := o.GetObjectCreater().New(gvk)
+	if err != nil {
+		return nil, err
+	}
+	err = o.GetObjectConvertor().Convert(obj, out, nil)
+	if err != nil {
+		return nil, err
+	}
+	// Explicitly set the GVK
+	out.GetObjectKind().SetGroupVersionKind(gvk)
+	return out, nil
+}
