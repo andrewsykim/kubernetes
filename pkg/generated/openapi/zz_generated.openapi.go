@@ -35,6 +35,7 @@ import (
 
 func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenAPIDefinition {
 	return map[string]common.OpenAPIDefinition{
+		"k8s.io/api/admissionregistration/v1.MatchCondition":                                              schema_k8sio_api_admissionregistration_v1_MatchCondition(ref),
 		"k8s.io/api/admissionregistration/v1.MutatingWebhook":                                             schema_k8sio_api_admissionregistration_v1_MutatingWebhook(ref),
 		"k8s.io/api/admissionregistration/v1.MutatingWebhookConfiguration":                                schema_k8sio_api_admissionregistration_v1_MutatingWebhookConfiguration(ref),
 		"k8s.io/api/admissionregistration/v1.MutatingWebhookConfigurationList":                            schema_k8sio_api_admissionregistration_v1_MutatingWebhookConfigurationList(ref),
@@ -56,6 +57,7 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		"k8s.io/api/admissionregistration/v1alpha1.ValidatingAdmissionPolicyList":                         schema_k8sio_api_admissionregistration_v1alpha1_ValidatingAdmissionPolicyList(ref),
 		"k8s.io/api/admissionregistration/v1alpha1.ValidatingAdmissionPolicySpec":                         schema_k8sio_api_admissionregistration_v1alpha1_ValidatingAdmissionPolicySpec(ref),
 		"k8s.io/api/admissionregistration/v1alpha1.Validation":                                            schema_k8sio_api_admissionregistration_v1alpha1_Validation(ref),
+		"k8s.io/api/admissionregistration/v1beta1.MatchCondition":                                         schema_k8sio_api_admissionregistration_v1beta1_MatchCondition(ref),
 		"k8s.io/api/admissionregistration/v1beta1.MutatingWebhook":                                        schema_k8sio_api_admissionregistration_v1beta1_MutatingWebhook(ref),
 		"k8s.io/api/admissionregistration/v1beta1.MutatingWebhookConfiguration":                           schema_k8sio_api_admissionregistration_v1beta1_MutatingWebhookConfiguration(ref),
 		"k8s.io/api/admissionregistration/v1beta1.MutatingWebhookConfigurationList":                       schema_k8sio_api_admissionregistration_v1beta1_MutatingWebhookConfigurationList(ref),
@@ -1170,6 +1172,36 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 	}
 }
 
+func schema_k8sio_api_admissionregistration_v1_MatchCondition(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "MatchCondition represents a condition which must by fulfilled for a request to be sent to a webhook.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"name": {
+						SchemaProps: spec.SchemaProps{
+							Description: "`name` is an identifier for this match condition, used for strategic merging of MatchConditions, as well as providing an identifier for logging purposes. A good name should be descriptive of the associated expression. `name` must be a valid RFC 1123 DNS subdomain, and unique in a set of MatchConditions.\n\nRequired.",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"expression": {
+						SchemaProps: spec.SchemaProps{
+							Description: "NOTE: Placeholder documentation, to be replaced by https://github.com/kubernetes/website/issues/39089. Docs waiting on: https://github.com/kubernetes/website/pull/39642\n\n`expression` represents the expression which will be evaluated by CEL. ref: https://github.com/google/cel-spec CEL expressions have access to the contents of the AdmissionRequest, organized into CEL variables:\n\n'object' - The object from the incoming request. The value is null for DELETE requests. 'oldObject' - The existing object. The value is null for CREATE requests. 'request' - Attributes of the admission request([ref](/pkg/apis/admission/types.go#AdmissionRequest)).\n\nRequired.",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+				},
+				Required: []string{"name", "expression"},
+			},
+		},
+	}
+}
+
 func schema_k8sio_api_admissionregistration_v1_MutatingWebhook(ref common.ReferenceCallback) common.OpenAPIDefinition {
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
@@ -1272,12 +1304,32 @@ func schema_k8sio_api_admissionregistration_v1_MutatingWebhook(ref common.Refere
 							Enum:        []interface{}{"IfNeeded", "Never"},
 						},
 					},
+					"matchConditions": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-patch-merge-key": "name",
+								"x-kubernetes-patch-strategy":  "merge",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "matchConditions is a list of conditions on the AdmissionRequest ('request') that must be met for a request to be sent to this webhook. All conditions in the list must evaluate to TRUE for the request to be matched. This is an alpha feature and managed by the AdmissionWebhookMatchConditions feature gate. If this field is not set no matching will occur through cel. If any condition in the list fails to be met apiserver will not call out to the webhook.\n\nDefaults to nil",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref("k8s.io/api/admissionregistration/v1.MatchCondition"),
+									},
+								},
+							},
+						},
+					},
 				},
 				Required: []string{"name", "clientConfig", "sideEffects", "admissionReviewVersions"},
 			},
 		},
 		Dependencies: []string{
-			"k8s.io/api/admissionregistration/v1.RuleWithOperations", "k8s.io/api/admissionregistration/v1.WebhookClientConfig", "k8s.io/apimachinery/pkg/apis/meta/v1.LabelSelector"},
+			"k8s.io/api/admissionregistration/v1.MatchCondition", "k8s.io/api/admissionregistration/v1.RuleWithOperations", "k8s.io/api/admissionregistration/v1.WebhookClientConfig", "k8s.io/apimachinery/pkg/apis/meta/v1.LabelSelector"},
 	}
 }
 
@@ -1706,12 +1758,32 @@ func schema_k8sio_api_admissionregistration_v1_ValidatingWebhook(ref common.Refe
 							},
 						},
 					},
+					"matchConditions": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-patch-merge-key": "name",
+								"x-kubernetes-patch-strategy":  "merge",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "MatchConditions is a list of conditions on the AdmissionRequest ('request') that must be met for a request to be sent to this webhook. All conditions in the list must evaluate to TRUE for the request to be matched. This is an alpha feature and managed by the AdmissionWebhookMatchConditions feature gate. If this field is not set no matching will occur through cel. If any condition in the list fails to be met apiserver will not call out to the webhook.\n\nDefaults to nil",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref("k8s.io/api/admissionregistration/v1.MatchCondition"),
+									},
+								},
+							},
+						},
+					},
 				},
 				Required: []string{"name", "clientConfig", "sideEffects", "admissionReviewVersions"},
 			},
 		},
 		Dependencies: []string{
-			"k8s.io/api/admissionregistration/v1.RuleWithOperations", "k8s.io/api/admissionregistration/v1.WebhookClientConfig", "k8s.io/apimachinery/pkg/apis/meta/v1.LabelSelector"},
+			"k8s.io/api/admissionregistration/v1.MatchCondition", "k8s.io/api/admissionregistration/v1.RuleWithOperations", "k8s.io/api/admissionregistration/v1.WebhookClientConfig", "k8s.io/apimachinery/pkg/apis/meta/v1.LabelSelector"},
 	}
 }
 
@@ -2435,6 +2507,36 @@ func schema_k8sio_api_admissionregistration_v1alpha1_Validation(ref common.Refer
 	}
 }
 
+func schema_k8sio_api_admissionregistration_v1beta1_MatchCondition(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "MatchCondition represents a condition which must by fulfilled for a request to be sent to a webhook.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"name": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Name is an identifier for this match condition, used for strategic merging of MatchConditions, as well as providing an identifier for logging purposes. A good name should be descriptive of the associated expression. Name must be a valid RFC 1123 DNS subdomain, and unique in a set of MatchConditions. Required.",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"expression": {
+						SchemaProps: spec.SchemaProps{
+							Description: "NOTE: Placeholder documentation, to be replaced by https://github.com/kubernetes/website/issues/39089. Docs waiting on: https://github.com/kubernetes/website/pull/39642\n\nExpression represents the expression which will be evaluated by CEL. ref: https://github.com/google/cel-spec CEL expressions have access to the contents of the AdmissionRequest, organized into CEL variables:\n\n'object' - The object from the incoming request. The value is null for DELETE requests. 'oldObject' - The existing object. The value is null for CREATE requests. 'request' - Attributes of the admission request([ref](/pkg/apis/admission/types.go#AdmissionRequest)).\n\nRequired.",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+				},
+				Required: []string{"name", "expression"},
+			},
+		},
+	}
+}
+
 func schema_k8sio_api_admissionregistration_v1beta1_MutatingWebhook(ref common.ReferenceCallback) common.OpenAPIDefinition {
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
@@ -2533,12 +2635,32 @@ func schema_k8sio_api_admissionregistration_v1beta1_MutatingWebhook(ref common.R
 							Format:      "",
 						},
 					},
+					"matchConditions": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-patch-merge-key": "name",
+								"x-kubernetes-patch-strategy":  "merge",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "MatchConditions is a list of conditions on the AdmissionRequest ('request') that must be met for a request to be sent to this webhook. All conditions in the list must evaluate to TRUE for the request to be matched. This is an alpha feature and managed by the AdmissionWebhookMatchConditions feature gate. If this field is not set no matching will occur through cel. If any condition in the list fails to be met apiserver will not call out to the webhook.\n\nDefaults to nil",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref("k8s.io/api/admissionregistration/v1beta1.MatchCondition"),
+									},
+								},
+							},
+						},
+					},
 				},
 				Required: []string{"name", "clientConfig"},
 			},
 		},
 		Dependencies: []string{
-			"k8s.io/api/admissionregistration/v1.RuleWithOperations", "k8s.io/api/admissionregistration/v1beta1.WebhookClientConfig", "k8s.io/apimachinery/pkg/apis/meta/v1.LabelSelector"},
+			"k8s.io/api/admissionregistration/v1.RuleWithOperations", "k8s.io/api/admissionregistration/v1beta1.MatchCondition", "k8s.io/api/admissionregistration/v1beta1.WebhookClientConfig", "k8s.io/apimachinery/pkg/apis/meta/v1.LabelSelector"},
 	}
 }
 
@@ -2784,12 +2906,32 @@ func schema_k8sio_api_admissionregistration_v1beta1_ValidatingWebhook(ref common
 							},
 						},
 					},
+					"matchConditions": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-patch-merge-key": "name",
+								"x-kubernetes-patch-strategy":  "merge",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "MatchConditions is a list of conditions on the AdmissionRequest ('request') that must be met for a request to be sent to this webhook. All conditions in the list must evaluate to TRUE for the request to be matched. This is an alpha feature and managed by the AdmissionWebhookMatchConditions feature gate. If this field is not set no matching will occur through cel. If any condition in the list fails to be met apiserver will not call out to the webhook.\n\nDefaults to nil",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref("k8s.io/api/admissionregistration/v1beta1.MatchCondition"),
+									},
+								},
+							},
+						},
+					},
 				},
 				Required: []string{"name", "clientConfig"},
 			},
 		},
 		Dependencies: []string{
-			"k8s.io/api/admissionregistration/v1.RuleWithOperations", "k8s.io/api/admissionregistration/v1beta1.WebhookClientConfig", "k8s.io/apimachinery/pkg/apis/meta/v1.LabelSelector"},
+			"k8s.io/api/admissionregistration/v1.RuleWithOperations", "k8s.io/api/admissionregistration/v1beta1.MatchCondition", "k8s.io/api/admissionregistration/v1beta1.WebhookClientConfig", "k8s.io/apimachinery/pkg/apis/meta/v1.LabelSelector"},
 	}
 }
 
