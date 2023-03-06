@@ -26,26 +26,34 @@ import (
 
 // matcher implements the Matcher interface
 type matcher struct {
-	filter     cel.Filter
+	filter cel.Filter
 }
 
 func NewMatcher(filter cel.Filter) Matcher {
 	return &matcher{
-		filter:     filter,
+		filter: filter,
 	}
 }
 
 // Match takes a list of Evaluation converts them into actionable a decision of whether they match or not.
 // If no match returns name of failed condition
 func (v *matcher) Match(versionedAttr *admission.VersionedAttributes) (bool, string, error) {
+	ar := cel.CreateAdmissionRequest(versionedAttr.Attributes)
 
-	evalResults, err := v.filter.ForInput(versionedAttr, nil, cel.CreateAdmissionRequest(versionedAttr.Attributes))
+	//TODO: compile can return nil filter! that can cause panic
+	if v.filter == nil {
+		return true, "", nil
+	}
+
+	evalResults, err := v.filter.ForInput(versionedAttr, nil, ar)
 	if err != nil {
 		// on error ignore the match condition, don't apply matching
 		return true, "", err
 	}
 
 	for _, evalResult := range evalResults {
+		klog.Infof("ivelichkovich evalResult is %v", evalResult.EvalResult)
+		klog.Infof("ivelichkovich error is %v", evalResult.Error)
 		if evalResult.EvalResult == celtypes.False {
 			matchCondition, ok := evalResult.ExpressionAccessor.(*MatchCondition)
 			if !ok {

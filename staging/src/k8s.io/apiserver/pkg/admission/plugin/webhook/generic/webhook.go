@@ -20,9 +20,10 @@ import (
 	"context"
 	"fmt"
 	"io"
+
 	admissionv1 "k8s.io/api/admission/v1"
 	admissionv1beta1 "k8s.io/api/admission/v1beta1"
-	"k8s.io/api/admissionregistration/v1"
+	v1 "k8s.io/api/admissionregistration/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apiserver/pkg/admission"
@@ -50,7 +51,7 @@ type Webhook struct {
 	namespaceMatcher *namespace.Matcher
 	objectMatcher    *object.Matcher
 	dispatcher       Dispatcher
-	filterCompiler cel.FilterCompiler
+	filterCompiler   cel.FilterCompiler
 }
 
 var (
@@ -94,7 +95,7 @@ func NewWebhook(handler *admission.Handler, configFile io.Reader, sourceFactory 
 		namespaceMatcher: &namespace.Matcher{},
 		objectMatcher:    &object.Matcher{},
 		dispatcher:       dispatcherFactory(&cm),
-		filterCompiler: cel.NewFilterCompiler(),
+		filterCompiler:   cel.NewFilterCompiler(),
 	}, nil
 }
 
@@ -213,8 +214,9 @@ func (a *Webhook) ShouldCallHook(h webhook.WebhookAccessor, attr admission.Attri
 	matchConditions := h.GetMatchConditions()
 	expressions := make([]cel.ExpressionAccessor, len(matchConditions))
 	for i, matchCondition := range matchConditions {
+		klog.Infof("ivelichkovich: found match condition %v", matchCondition.Name)
 		expressions[i] = &MatchCondition{
-			Name: matchCondition.Name,
+			Name:       matchCondition.Name,
 			Expression: matchCondition.Expression,
 		}
 	}
@@ -222,12 +224,13 @@ func (a *Webhook) ShouldCallHook(h webhook.WebhookAccessor, attr admission.Attri
 	versionedAttr, err := admission.NewVersionedAttributes(attr, attr.GetKind(), o)
 	if err == nil {
 		if matchesCondition, matchConditionName, err := matcher.Match(versionedAttr); !matchesCondition || err != nil {
-			klog.V(5).Infof("Did not call webhook due to match condition %v", matchConditionName)
+			klog.Infof("ivelichkovich: Did not call webhook due to match condition %v", matchConditionName)
 			//TODO: metric
 			return nil, nil
 		}
+	} else {
+		klog.Info("ivelichkovich error")
 	}
-
 
 	return invocation, nil
 }

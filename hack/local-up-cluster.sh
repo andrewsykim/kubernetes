@@ -573,7 +573,7 @@ EOF
       --storage-media-type="${STORAGE_MEDIA_TYPE}" \
       --etcd-servers="http://${ETCD_HOST}:${ETCD_PORT}" \
       --service-cluster-ip-range="${SERVICE_CLUSTER_IP_RANGE}" \
-      --feature-gates="${FEATURE_GATES}" \
+      --feature-gates="AdmissionWebhookMatchConditions=True" \
       --external-hostname="${EXTERNAL_HOSTNAME}" \
       --requestheader-username-headers=X-Remote-User \
       --requestheader-group-headers=X-Remote-Group \
