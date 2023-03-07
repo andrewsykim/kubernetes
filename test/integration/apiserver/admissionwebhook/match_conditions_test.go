@@ -2,17 +2,25 @@ package admissionwebhook
 
 import (
 	"context"
-	"strings"
+	"crypto/tls"
+	"crypto/x509"
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
-	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/apimachinery/pkg/util/wait"
 	clientset "k8s.io/client-go/kubernetes"
 
+	admissionv1 "k8s.io/api/admission/v1"
 	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
+	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/wait"
 	genericfeatures "k8s.io/apiserver/pkg/features"
 	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	featuregatetesting "k8s.io/component-base/featuregate/testing"
@@ -20,175 +28,166 @@ import (
 	"k8s.io/kubernetes/test/integration/framework"
 )
 
+type admissionRecorder struct {
+	mu       sync.Mutex
+	upCh     chan struct{}
+	upOnce   sync.Once
+	requests []*admissionv1.AdmissionRequest
+}
+
+func (r *admissionRecorder) Record(req *admissionv1.AdmissionRequest) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.requests = append(r.requests, req)
+}
+
+func (r *admissionRecorder) MarkerReceived() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.upOnce.Do(func() {
+		close(r.upCh)
+	})
+}
+
+func (r *admissionRecorder) Reset() chan struct{} {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.requests = []*admissionv1.AdmissionRequest{}
+	r.upCh = make(chan struct{})
+	r.upOnce = sync.Once{}
+	return r.upCh
+}
+
+func newMatchConditionHandler(recorder *admissionRecorder) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		data, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, err.Error(), 400)
+		}
+		review := admissionv1.AdmissionReview{}
+		if err := json.Unmarshal(data, &review); err != nil {
+			http.Error(w, err.Error(), 400)
+		}
+
+		review.Response = &admissionv1.AdmissionResponse{
+			Allowed: true,
+			UID:     review.Request.UID,
+			Result:  &metav1.Status{Message: "admitted"},
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(review); err != nil {
+			http.Error(w, err.Error(), 400)
+			return
+		}
+
+		switch r.URL.Path {
+		case "/marker":
+			recorder.MarkerReceived()
+			return
+		}
+
+		recorder.Record(review.Request)
+	})
+}
+
 // Test_MatchConditions tests a ValidatingWebhookConfigurations that validates different cases of matchCondition fields
 // a webhook is created with failPolicy fail to force all matching conditions to fail
 func Test_MatchConditions_ValidatingWebhookConfiguration(t *testing.T) {
 	testcases := []struct {
-		name              string
-		validatingWebhook *admissionregistrationv1.ValidatingWebhookConfiguration
-		namespace         *v1.Namespace
-		expectError       bool
+		name            string
+		matchConditions []admissionregistrationv1.MatchCondition
+		pods            []*corev1.Pod
+		matchedPods     []*corev1.Pod
+		expectError     bool
 	}{
 		{
-			name: "namespace name contains suffix exempt from vwh",
-			validatingWebhook: brokenValidatingWebhookConfiguration("test", []admissionregistrationv1.MatchCondition{
+			name: "pods in namespace kube-system is ignored",
+			matchConditions: []admissionregistrationv1.MatchCondition{
 				{
-					Name:       "test1",
-					Expression: "object.metadata.name.endsWith('k8s')",
+					Name:       "pods-in-kube-system-exempt",
+					Expression: "object.metadata.namespace != 'kube-system'",
 				},
-			}),
-			namespace: &v1.Namespace{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "test-k8s",
+			},
+			pods: []*corev1.Pod{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test1",
+						Namespace: "kube-system",
+					},
+					Spec: v1.PodSpec{
+						Containers: []v1.Container{
+							{
+								Name:  "test",
+								Image: "test",
+							},
+						},
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test2",
+						Namespace: "default",
+					},
+					Spec: v1.PodSpec{
+						Containers: []v1.Container{
+							{
+								Name:  "test",
+								Image: "test",
+							},
+						},
+					},
+				},
+			},
+			matchedPods: []*corev1.Pod{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test2",
+						Namespace: "default",
+					},
+					Spec: v1.PodSpec{
+						Containers: []v1.Container{
+							{
+								Name:  "test",
+								Image: "test",
+							},
+						},
+					},
 				},
 			},
 			expectError: false,
 		},
-		//{
-		//	name: "namespace name does NOT contain suffix enforced by validating admission policy using, object metadata fields",
-		//	policy: withValidations([]admissionregistrationv1alpha1.Validation{
-		//		{
-		//			Expression: "object.metadata.name.endsWith('k8s')",
-		//		},
-		//	}, withFailurePolicy(admissionregistrationv1alpha1.Fail, withNamespaceMatch(makePolicy("validate-namespace-suffix")))),
-		//	policyBinding: makeBinding("validate-namespace-suffix-binding", "validate-namespace-suffix", ""),
-		//	namespace: &v1.Namespace{
-		//		ObjectMeta: metav1.ObjectMeta{
-		//			Name: "test-foobar",
-		//		},
-		//	},
-		//	err:           "namespaces \"test-foobar\" is forbidden: ValidatingAdmissionPolicy 'validate-namespace-suffix' with binding 'validate-namespace-suffix-binding' denied request: failed expression: object.metadata.name.endsWith('k8s')",
-		//	failureReason: metav1.StatusReasonInvalid,
-		//},
-		//{
-		//	name: "namespace name contains suffix enforced by validating admission policy, using request field",
-		//	policy: withValidations([]admissionregistrationv1alpha1.Validation{
-		//		{
-		//			Expression: "request.name.endsWith('k8s')",
-		//		},
-		//	}, withFailurePolicy(admissionregistrationv1alpha1.Fail, withNamespaceMatch(makePolicy("validate-namespace-suffix")))),
-		//	policyBinding: makeBinding("validate-namespace-suffix-binding", "validate-namespace-suffix", ""),
-		//	namespace: &v1.Namespace{
-		//		ObjectMeta: metav1.ObjectMeta{
-		//			Name: "test-k8s",
-		//		},
-		//	},
-		//	err: "",
-		//},
-		//{
-		//	name: "namespace name does NOT contains suffix enforced by validating admission policy, using request field",
-		//	policy: withValidations([]admissionregistrationv1alpha1.Validation{
-		//		{
-		//			Expression: "request.name.endsWith('k8s')",
-		//		},
-		//	}, withFailurePolicy(admissionregistrationv1alpha1.Fail, withNamespaceMatch(makePolicy("validate-namespace-suffix")))),
-		//	policyBinding: makeBinding("validate-namespace-suffix-binding", "validate-namespace-suffix", ""),
-		//	namespace: &v1.Namespace{
-		//		ObjectMeta: metav1.ObjectMeta{
-		//			Name: "test-k8s",
-		//		},
-		//	},
-		//	err: "",
-		//},
-		//{
-		//	name: "runtime error when validating namespace match conditions",
-		//	policy: withValidations([]admissionregistrationv1alpha1.Validation{
-		//		{
-		//			Expression: "object.nonExistentProperty == 'someval'",
-		//		},
-		//	}, withFailurePolicy(admissionregistrationv1alpha1.Ignore, withNamespaceMatch(makePolicy("validate-namespace-suffix")))),
-		//	policyBinding: makeBinding("validate-namespace-suffix-binding", "validate-namespace-suffix", ""),
-		//	namespace: &v1.Namespace{
-		//		ObjectMeta: metav1.ObjectMeta{
-		//			Name: "test-k8s",
-		//		},
-		//	},
-		//	err: "",
-		//},
-		//{
-		//	name: "runtime error due to unguarded params",
-		//	policy: withValidations([]admissionregistrationv1alpha1.Validation{
-		//		{
-		//			Expression: "object.metadata.name.startsWith(params.metadata.name)",
-		//		},
-		//	}, withParams(configParamKind(), withFailurePolicy(admissionregistrationv1alpha1.Fail, withNamespaceMatch(makePolicy("validate-namespace-suffix"))))),
-		//	policyBinding: makeBinding("validate-namespace-suffix-binding", "validate-namespace-suffix", ""),
-		//	namespace: &v1.Namespace{
-		//		ObjectMeta: metav1.ObjectMeta{
-		//			Name: "test-k8s",
-		//		},
-		//	},
-		//	err:           "namespaces \"test-k8s\" is forbidden: ValidatingAdmissionPolicy 'validate-namespace-suffix' with binding 'validate-namespace-suffix-binding' denied request: expression 'object.metadata.name.startsWith(params.metadata.name)' resulted in error: no such key: metadata",
-		//	failureReason: metav1.StatusReasonInvalid,
-		//},
-		//{
-		//	name: "with check against unguarded params using has()",
-		//	policy: withValidations([]admissionregistrationv1alpha1.Validation{
-		//		{
-		//			Expression: "has(params.metadata) && has(params.metadata.name) && object.metadata.name.endsWith(params.metadata.name)",
-		//		},
-		//	}, withParams(configParamKind(), withFailurePolicy(admissionregistrationv1alpha1.Fail, withNamespaceMatch(makePolicy("validate-namespace-suffix"))))),
-		//	policyBinding: makeBinding("validate-namespace-suffix-binding", "validate-namespace-suffix", ""),
-		//	namespace: &v1.Namespace{
-		//		ObjectMeta: metav1.ObjectMeta{
-		//			Name: "test-k8s",
-		//		},
-		//	},
-		//	err:           "namespaces \"test-k8s\" is forbidden: ValidatingAdmissionPolicy 'validate-namespace-suffix' with binding 'validate-namespace-suffix-binding' denied request: expression 'has(params.metadata) && has(params.metadata.name) && object.metadata.name.endsWith(params.metadata.name)' resulted in error: invalid type for field selection.",
-		//	failureReason: metav1.StatusReasonInvalid,
-		//},
-		//{
-		//	name: "with check against null params",
-		//	policy: withValidations([]admissionregistrationv1alpha1.Validation{
-		//		{
-		//			Expression: "(params != null && object.metadata.name.endsWith(params.metadata.name))",
-		//		},
-		//	}, withParams(configParamKind(), withFailurePolicy(admissionregistrationv1alpha1.Fail, withNamespaceMatch(makePolicy("validate-namespace-suffix"))))),
-		//	policyBinding: makeBinding("validate-namespace-suffix-binding", "validate-namespace-suffix", ""),
-		//	namespace: &v1.Namespace{
-		//		ObjectMeta: metav1.ObjectMeta{
-		//			Name: "test-k8s",
-		//		},
-		//	},
-		//	err:           "namespaces \"test-k8s\" is forbidden: ValidatingAdmissionPolicy 'validate-namespace-suffix' with binding 'validate-namespace-suffix-binding' denied request: failed expression: (params != null && object.metadata.name.endsWith(params.metadata.name))",
-		//	failureReason: metav1.StatusReasonInvalid,
-		//},
-		//{
-		//	name: "with check against unguarded params using has() and default check",
-		//	policy: withValidations([]admissionregistrationv1alpha1.Validation{
-		//		{
-		//			Expression: "(has(params.metadata) && has(params.metadata.name) && object.metadata.name.startsWith(params.metadata.name)) || object.metadata.name.endsWith('k8s')",
-		//		},
-		//	}, withParams(configParamKind(), withFailurePolicy(admissionregistrationv1alpha1.Fail, withNamespaceMatch(makePolicy("validate-namespace-suffix"))))),
-		//	policyBinding: makeBinding("validate-namespace-suffix-binding", "validate-namespace-suffix", ""),
-		//	namespace: &v1.Namespace{
-		//		ObjectMeta: metav1.ObjectMeta{
-		//			Name: "test-k8s",
-		//		},
-		//	},
-		//	err: "",
-		//},
-		//{
-		//	name: "with check against null params and default check",
-		//	policy: withValidations([]admissionregistrationv1alpha1.Validation{
-		//		{
-		//			Expression: "(params != null && object.metadata.name.startsWith(params.metadata.name)) || object.metadata.name.endsWith('k8s')",
-		//		},
-		//	}, withParams(configParamKind(), withFailurePolicy(admissionregistrationv1alpha1.Fail, withNamespaceMatch(makePolicy("validate-namespace-suffix"))))),
-		//	policyBinding: makeBinding("validate-namespace-suffix-binding", "validate-namespace-suffix", ""),
-		//	namespace: &v1.Namespace{
-		//		ObjectMeta: metav1.ObjectMeta{
-		//			Name: "test-k8s",
-		//		},
-		//	},
-		//	err: "",
-		//},
+		// TODO: add more test cases
 	}
 
 	for _, testcase := range testcases {
 		t.Run(testcase.name, func(t *testing.T) {
 			defer featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, genericfeatures.AdmissionWebhookMatchConditions, true)()
-			server, err := apiservertesting.StartTestServer(t, nil, nil, framework.SharedEtcd())
+
+			roots := x509.NewCertPool()
+			if !roots.AppendCertsFromPEM(localhostCert) {
+				t.Fatal("Failed to append Cert from PEM")
+			}
+			cert, err := tls.X509KeyPair(localhostCert, localhostKey)
+			if err != nil {
+				t.Fatalf("Failed to build cert with error: %+v", err)
+			}
+
+			recorder := &admissionRecorder{requests: []*admissionv1.AdmissionRequest{}}
+			upCh := recorder.Reset()
+
+			webhookServer := httptest.NewUnstartedServer(newMatchConditionHandler(recorder))
+			webhookServer.TLS = &tls.Config{
+				RootCAs:      roots,
+				Certificates: []tls.Certificate{cert},
+			}
+			webhookServer.StartTLS()
+			defer webhookServer.Close()
+
+			server, err := apiservertesting.StartTestServer(t, nil, []string{
+				"--disable-admission-plugins=ServiceAccount",
+			}, framework.SharedEtcd())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -200,88 +199,133 @@ func Test_MatchConditions_ValidatingWebhookConfiguration(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			//webhook := brokenValidatingWebhookConfiguration("test", nil)
-			//if _, err := client.AdmissionregistrationV1().ValidatingWebhookConfigurations().Create(context.TODO(), webhook, metav1.CreateOptions{}); err != nil {
-			//	t.Fatal(err)
-			//}
-			if err := createAndWaitReady(t, client, testcase.validatingWebhook, nil); err != nil {
+
+			// Write markers to a separate namespace to avoid cross-talk
+			markerNs := "marker"
+			_, err = client.CoreV1().Namespaces().Create(context.TODO(), &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: markerNs}}, metav1.CreateOptions{})
+			if err != nil {
 				t.Fatal(err)
 			}
 
-			_, err = client.CoreV1().Namespaces().Create(context.TODO(), testcase.namespace, metav1.CreateOptions{})
+			// Create a marker object to use to check for the webhook configurations to be ready.
+			marker, err := client.CoreV1().Pods(markerNs).Create(context.TODO(), newMarkerPod(markerNs), metav1.CreateOptions{})
+			if err != nil {
+				t.Fatal(err)
+			}
 
+			fail := admissionregistrationv1.Fail
+			endpoint := webhookServer.URL
+			markerEndpoint := webhookServer.URL + "/marker"
+			validatingwebhook := &admissionregistrationv1.ValidatingWebhookConfiguration{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "admission.integration.test",
+				},
+				Webhooks: []admissionregistrationv1.ValidatingWebhook{
+					{
+						Name: "admission.integration.test",
+						Rules: []admissionregistrationv1.RuleWithOperations{{
+							Operations: []admissionregistrationv1.OperationType{admissionregistrationv1.OperationAll},
+							Rule: admissionregistrationv1.Rule{
+								APIGroups:   []string{""},
+								APIVersions: []string{"v1"},
+								Resources:   []string{"pods"},
+							},
+						}},
+						ClientConfig: admissionregistrationv1.WebhookClientConfig{
+							URL:      &endpoint,
+							CABundle: localhostCert,
+						},
+						// ignore pods in the marker namespace
+						NamespaceSelector: &metav1.LabelSelector{
+							MatchExpressions: []metav1.LabelSelectorRequirement{
+								{
+									Key:      v1.LabelMetadataName,
+									Operator: metav1.LabelSelectorOpNotIn,
+									Values:   []string{"marker"},
+								},
+							}},
+						FailurePolicy:           &fail,
+						SideEffects:             &noSideEffects,
+						AdmissionReviewVersions: []string{"v1"},
+						MatchConditions:         testcase.matchConditions,
+					},
+					{
+						Name: "admission.integration.test.marker",
+						Rules: []admissionregistrationv1.RuleWithOperations{{
+							Operations: []admissionregistrationv1.OperationType{admissionregistrationv1.OperationAll},
+							Rule:       admissionregistrationv1.Rule{APIGroups: []string{""}, APIVersions: []string{"v1"}, Resources: []string{"pods"}},
+						}},
+						ClientConfig: admissionregistrationv1.WebhookClientConfig{
+							URL:      &markerEndpoint,
+							CABundle: localhostCert,
+						},
+						NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{
+							v1.LabelMetadataName: "marker",
+						}},
+						ObjectSelector:          &metav1.LabelSelector{MatchLabels: map[string]string{"marker": "true"}},
+						FailurePolicy:           &fail,
+						SideEffects:             &noSideEffects,
+						AdmissionReviewVersions: []string{"v1"},
+						MatchConditions:         testcase.matchConditions,
+					},
+				},
+			}
+
+			cfg, err := client.AdmissionregistrationV1().ValidatingWebhookConfigurations().Create(context.TODO(), validatingwebhook, metav1.CreateOptions{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() {
+				err := client.AdmissionregistrationV1().ValidatingWebhookConfigurations().Delete(context.TODO(), cfg.GetName(), metav1.DeleteOptions{})
+				if err != nil {
+					t.Fatal(err)
+				}
+			}()
+
+			// wait until new webhook is called the first time
+			if err := wait.PollImmediate(time.Millisecond*5, wait.ForeverTestTimeout, func() (bool, error) {
+				_, err = client.CoreV1().Pods(markerNs).Patch(context.TODO(), marker.Name, types.JSONPatchType, []byte("[]"), metav1.PatchOptions{})
+				select {
+				case <-upCh:
+					return true, nil
+				default:
+					t.Logf("Waiting for webhook to become effective, getting marker object: %v", err)
+					return false, nil
+				}
+			}); err != nil {
+				t.Fatal(err)
+			}
+
+			for _, pod := range testcase.pods {
+				_, err := client.CoreV1().Pods(pod.Namespace).Create(context.TODO(), pod, metav1.CreateOptions{})
+				if err != nil {
+					t.Fatalf("unexpected error creating test pod: %v", err)
+				}
+			}
+
+			if len(recorder.requests) != len(testcase.matchedPods) {
+				t.Errorf("unexpected requests %v, expected %v", recorder.requests, testcase.matchedPods)
+			}
+
+			// TODO: add more checks about the admission request seen by the recorder
 		})
 	}
 }
 
-func createAndWaitReady(t *testing.T, client *clientset.Clientset, webhookconfig *admissionregistrationv1.ValidatingWebhookConfiguration, matchLabels map[string]string) error {
-	marker := &v1.Endpoints{ObjectMeta: metav1.ObjectMeta{Name: "test-marker", Namespace: "default", Labels: matchLabels}}
-	defer func() {
-		err := client.CoreV1().Endpoints("default").Delete(context.TODO(), marker.Name, metav1.DeleteOptions{})
-		if err != nil {
-			t.Logf("error deleting marker: %v", err)
-		}
-	}()
-	marker, err := client.CoreV1().Endpoints("default").Create(context.TODO(), marker, metav1.CreateOptions{})
-	if err != nil {
-		return err
-	}
-
-	_, err = client.AdmissionregistrationV1().ValidatingWebhookConfigurations().Create(context.TODO(), webhookconfig, metav1.CreateOptions{})
-	if err != nil {
-		return err
-	}
-
-	if waitErr := wait.PollImmediate(time.Millisecond*5, wait.ForeverTestTimeout, func() (bool, error) {
-		resp, err := client.CoreV1().Endpoints("default").Patch(context.TODO(), marker.Name, types.JSONPatchType, []byte("[]"), metav1.PatchOptions{})
-		if err != nil && strings.Contains(err.Error(), "marker denied; policy is ready") {
-			return true, nil
-		} else if err != nil && strings.Contains(err.Error(), "not yet synced to use for admission") {
-			t.Logf("waiting for webhook config to be ready. Marker: %v. Admission not synced yet: %v", marker, err)
-			return false, nil
-		} else {
-			t.Logf("waiting for webhook config to be ready. Marker: %v, Last marker patch error: %v. Resp: %v", marker, err, resp)
-			return false, err
-		}
-	}); waitErr != nil {
-		return waitErr
-	}
-	return nil
-}
-
-func brokenValidatingWebhookConfiguration(name string, matchConditions []admissionregistrationv1.MatchCondition) *admissionregistrationv1.ValidatingWebhookConfiguration {
-	var path string
-	failurePolicy := admissionregistrationv1.Fail
-	return &admissionregistrationv1.ValidatingWebhookConfiguration{
+func newMarkerPod(namespace string) *corev1.Pod {
+	return &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: name,
-		},
-		Webhooks: []admissionregistrationv1.ValidatingWebhook{
-			{
-				Name: "broken-webhook.k8s.io",
-				Rules: []admissionregistrationv1.RuleWithOperations{{
-					Operations: []admissionregistrationv1.OperationType{admissionregistrationv1.OperationAll},
-					Rule: admissionregistrationv1.Rule{
-						APIGroups:   []string{"*"},
-						APIVersions: []string{"*"},
-						Resources:   []string{"*"},
-					},
-				}},
-				// This client config references a non existent service
-				// so it should always fail.
-				ClientConfig: admissionregistrationv1.WebhookClientConfig{
-					Service: &admissionregistrationv1.ServiceReference{
-						Namespace: "default",
-						Name:      "invalid-webhook-service",
-						Path:      &path,
-					},
-					CABundle: nil,
-				},
-				FailurePolicy:           &failurePolicy,
-				SideEffects:             &noSideEffects,
-				AdmissionReviewVersions: []string{"v1"},
-				MatchConditions:         matchConditions,
+			Namespace: namespace,
+			Name:      "marker",
+			Labels: map[string]string{
+				"marker": "true",
 			},
+		},
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{{
+				Name:  "fake-name",
+				Image: "fakeimage",
+			}},
 		},
 	}
 }
